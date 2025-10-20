@@ -1,0 +1,9 @@
+import pytest
+
+from aegentra.models import encode_arguments
+
+
+@pytest.mark.parametrize("value", [1.5, float("nan"), float("inf"), object(), (1, 2)])
+def test_payloads_do_not_stringify_or_round_unsupported_values(value: object) -> None:
+    with pytest.raises(TypeError, match="Unsupported argument type"):
+        encode_arguments({"value": value})
