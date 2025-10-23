@@ -7,3 +7,8 @@ from aegentra.models import encode_arguments
 def test_payloads_do_not_stringify_or_round_unsupported_values(value: object) -> None:
     with pytest.raises(TypeError, match="Unsupported argument type"):
         encode_arguments({"value": value})
+
+
+def test_non_string_keys_are_not_coerced() -> None:
+    with pytest.raises(TypeError, match="keys must be strings"):
+        encode_arguments({1: "one"})
