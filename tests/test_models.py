@@ -19,3 +19,7 @@ def test_nested_json_is_deterministic_and_round_trips() -> None:
     encoded = encode_arguments(payload)
     assert encoded == '{"count":3,"list":[{"a":null,"z":2},true,"text"]}'
     assert decode_arguments(encoded) == payload
+
+
+def test_missing_and_explicit_null_are_not_equivalent() -> None:
+    assert encode_arguments({}) != encode_arguments({"value": None})
