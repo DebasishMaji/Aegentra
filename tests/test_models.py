@@ -23,3 +23,10 @@ def test_nested_json_is_deterministic_and_round_trips() -> None:
 
 def test_missing_and_explicit_null_are_not_equivalent() -> None:
     assert encode_arguments({}) != encode_arguments({"value": None})
+
+
+def test_decoded_objects_do_not_alias_a_previous_read() -> None:
+    payload = '{"nested":{"value":1}}'
+    first = decode_arguments(payload)
+    first["nested"] = {"value": 99}
+    assert decode_arguments(payload) == {"nested": {"value": 1}}
