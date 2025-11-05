@@ -30,3 +30,9 @@ def test_decoded_objects_do_not_alias_a_previous_read() -> None:
     first = decode_arguments(payload)
     first["nested"] = {"value": 99}
     assert decode_arguments(payload) == {"nested": {"value": 1}}
+
+
+@pytest.mark.parametrize("payload", ['"text"', "[1,2]", "null", '{"amount":NaN}'])
+def test_decoding_rejects_non_object_and_non_exact_json(payload: str) -> None:
+    with pytest.raises(TypeError):
+        decode_arguments(payload)
