@@ -1,5 +1,6 @@
 import pytest
 
+from aegentra import Knowledge, Observation, OperationKey
 from aegentra.models import decode_arguments, encode_arguments
 
 
@@ -36,3 +37,8 @@ def test_decoded_objects_do_not_alias_a_previous_read() -> None:
 def test_decoding_rejects_non_object_and_non_exact_json(payload: str) -> None:
     with pytest.raises(TypeError):
         decode_arguments(payload)
+
+
+def test_applied_observation_requires_a_receipt() -> None:
+    with pytest.raises(ValueError, match="requires a receipt"):
+        Observation(OperationKey("t", "a", "id"), "digest", Knowledge.APPLIED, "Confirmed")
