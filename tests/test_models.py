@@ -42,3 +42,14 @@ def test_decoding_rejects_non_object_and_non_exact_json(payload: str) -> None:
 def test_applied_observation_requires_a_receipt() -> None:
     with pytest.raises(ValueError, match="requires a receipt"):
         Observation(OperationKey("t", "a", "id"), "digest", Knowledge.APPLIED, "Confirmed")
+
+
+def test_unknown_observation_cannot_carry_an_applied_receipt() -> None:
+    with pytest.raises(ValueError, match="Only an applied"):
+        Observation(
+            OperationKey("t", "a", "id"),
+            "digest",
+            Knowledge.UNKNOWN,
+            "Uncertain",
+            '{"provider_id":"42"}',
+        )
