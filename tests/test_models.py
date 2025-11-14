@@ -53,3 +53,8 @@ def test_unknown_observation_cannot_carry_an_applied_receipt() -> None:
             "Uncertain",
             '{"provider_id":"42"}',
         )
+
+
+def test_raw_string_is_not_a_knowledge_assertion() -> None:
+    with pytest.raises(TypeError, match="explicit Knowledge"):
+        Observation(OperationKey("t", "a", "id"), "digest", "applied", "Confirmed")
