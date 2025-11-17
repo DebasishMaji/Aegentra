@@ -1,7 +1,11 @@
+import asyncio
+from pathlib import Path
+
 import pytest
 
-from aegentra import Knowledge, Observation, OperationKey
+from aegentra import Knowledge, Observation, Operation, OperationKey, Runtime, RuntimeUsageError
 from aegentra.models import decode_arguments, encode_arguments
+from aegentra.sandbox import RefundLedger, RefundTool
 
 
 @pytest.mark.parametrize("value", [1.5, float("nan"), float("inf"), object(), (1, 2)])
@@ -58,3 +62,12 @@ def test_unknown_observation_cannot_carry_an_applied_receipt() -> None:
 def test_raw_string_is_not_a_knowledge_assertion() -> None:
     with pytest.raises(TypeError, match="explicit Knowledge"):
         Observation(OperationKey("t", "a", "id"), "digest", "applied", "Confirmed")
+
+
+def test_runtime_is_bound_to_its_first_event_loop(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        asyncio.run(runtime.perform(operation, tool=RefundTool(ledger)))
+        with pytest.raises(RuntimeUsageError, match="one event loop"):
+            asyncio.run(runtime.perform(operation, tool=RefundTool(ledger)))
