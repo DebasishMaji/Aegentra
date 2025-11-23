@@ -4,8 +4,9 @@ from aegentra import (
     ConfirmedApplied,
     Operation,
     Runtime,
+    Unresolved,
 )
-from aegentra.sandbox import RefundLedger, RefundTool
+from aegentra.sandbox import RefundLedger, RefundTool, Scenario
 
 
 async def test_confirmation_is_replayed_without_another_write(
@@ -23,3 +24,15 @@ async def test_confirmation_is_replayed_without_another_write(
             "dispatch_reserved",
             "observed_applied",
         ]
+
+
+async def test_restart_reconciles_lost_acknowledgment(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "agent.sqlite3"
+    tool = RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(path) as runtime:
+        assert isinstance(await runtime.perform(operation, tool=tool), Unresolved)
+    with Runtime(path) as restarted:
+        assert isinstance(await restarted.perform(operation, tool=tool), ConfirmedApplied)
+    assert len(ledger.refunds()) == 1
