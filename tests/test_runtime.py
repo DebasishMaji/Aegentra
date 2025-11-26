@@ -1,6 +1,8 @@
+from dataclasses import replace
 from pathlib import Path
 
 from aegentra import (
+    BlockedByUnresolvedEffect,
     ConfirmedApplied,
     Operation,
     Runtime,
@@ -36,3 +38,18 @@ async def test_restart_reconciles_lost_acknowledgment(
     with Runtime(path) as restarted:
         assert isinstance(await restarted.perform(operation, tool=tool), ConfirmedApplied)
     assert len(ledger.refunds()) == 1
+
+
+async def test_new_operation_and_alternate_tool_cannot_bypass_unresolved_scope(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        first = await runtime.perform(
+            operation, tool=RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+        )
+        assert isinstance(first, Unresolved)
+        alternate = replace(operation, operation_id="fresh-id", approval_ref="fresh-approval")
+        result = await runtime.perform(alternate, tool=RefundTool(ledger, name="refund_order"))
+        assert isinstance(result, BlockedByUnresolvedEffect)
+        assert result.blocking_operation.key == operation.key
+        assert len(ledger.refunds()) == 1
