@@ -53,3 +53,20 @@ async def test_new_operation_and_alternate_tool_cannot_bypass_unresolved_scope(
         assert isinstance(result, BlockedByUnresolvedEffect)
         assert result.blocking_operation.key == operation.key
         assert len(ledger.refunds()) == 1
+
+
+async def test_late_commit_remains_unknown_until_provider_confirms(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    tool = RefundTool(ledger, Scenario.DELAYED_COMMIT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        assert isinstance(await runtime.perform(operation, tool=tool), Unresolved)
+        assert isinstance(await runtime.reconcile(operation.key, tool=tool), Unresolved)
+        assert ledger.refunds() == ()
+        blocked = await runtime.perform(
+            replace(operation, operation_id="retry"), tool=RefundTool(ledger)
+        )
+        assert isinstance(blocked, BlockedByUnresolvedEffect)
+        ledger.commit_pending(operation.key)
+        assert isinstance(await runtime.reconcile(operation.key, tool=tool), ConfirmedApplied)
+        assert len(ledger.refunds()) == 1
