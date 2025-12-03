@@ -4,6 +4,7 @@ from pathlib import Path
 from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
+    Knowledge,
     Operation,
     Runtime,
     Unresolved,
@@ -70,3 +71,14 @@ async def test_late_commit_remains_unknown_until_provider_confirms(
         ledger.commit_pending(operation.key)
         assert isinstance(await runtime.reconcile(operation.key, tool=tool), ConfirmedApplied)
         assert len(ledger.refunds()) == 1
+
+
+async def test_unobservable_operation_stays_unresolved_without_reexecution(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    tool = RefundTool(ledger, Scenario.UNOBSERVABLE)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        for _ in range(3):
+            assert isinstance(await runtime.perform(operation, tool=tool), Unresolved)
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+    assert len(ledger.refunds()) == 1
