@@ -4,6 +4,7 @@ from pathlib import Path
 from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
+    ConfirmedNotApplied,
     Knowledge,
     Operation,
     Runtime,
@@ -82,3 +83,19 @@ async def test_unobservable_operation_stays_unresolved_without_reexecution(
             assert isinstance(await runtime.perform(operation, tool=tool), Unresolved)
         assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
     assert len(ledger.refunds()) == 1
+
+
+async def test_final_rejection_releases_scope_but_does_not_retry_existing_operation(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        tool = RefundTool(ledger, Scenario.REJECTED)
+        first = await runtime.perform(operation, tool=tool)
+        assert isinstance(first, ConfirmedNotApplied)
+        assert isinstance(await runtime.perform(operation, tool=tool), ConfirmedNotApplied)
+        assert ledger.refunds() == ()
+        replacement = replace(operation, operation_id="new-authorized-attempt", approval_ref="new")
+        assert isinstance(
+            await runtime.perform(replacement, tool=RefundTool(ledger)), ConfirmedApplied
+        )
+        assert len(ledger.refunds()) == 1
