@@ -1,10 +1,13 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
+    IntentConflict,
     Knowledge,
     Operation,
     Runtime,
@@ -99,3 +102,19 @@ async def test_final_rejection_releases_scope_but_does_not_retry_existing_operat
             await runtime.perform(replacement, tool=RefundTool(ledger)), ConfirmedApplied
         )
         assert len(ledger.refunds()) == 1
+
+
+@pytest.mark.parametrize("field", ["arguments", "scope", "approval_ref"])
+async def test_changed_intent_is_rejected_even_after_success(
+    field: str, tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    changes = {
+        "arguments": replace(operation, arguments={"amount_minor": 6000, "currency": "USD"}),
+        "scope": replace(operation, scope=replace(operation.scope, resource="order-99")),
+        "approval_ref": replace(operation, approval_ref="another-approval"),
+    }
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger))
+        with pytest.raises(IntentConflict):
+            await runtime.perform(changes[field], tool=RefundTool(ledger))
+    assert len(ledger.refunds()) == 1
