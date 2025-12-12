@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from aegentra import (
+    AdapterMismatch,
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
@@ -118,3 +119,16 @@ async def test_changed_intent_is_rejected_even_after_success(
         with pytest.raises(IntentConflict):
             await runtime.perform(changes[field], tool=RefundTool(ledger))
     assert len(ledger.refunds()) == 1
+
+
+async def test_adapter_version_and_route_are_pinned(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT))
+        for changed in (
+            RefundTool(ledger, contract_version="sandbox-refund/2"),
+            RefundTool(ledger, name="refund_order"),
+        ):
+            with pytest.raises(AdapterMismatch):
+                await runtime.reconcile(operation.key, tool=changed)
