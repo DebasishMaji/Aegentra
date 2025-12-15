@@ -10,7 +10,9 @@ from aegentra import (
     ConfirmedNotApplied,
     IntentConflict,
     Knowledge,
+    Observation,
     Operation,
+    OperationRecord,
     Runtime,
     Unresolved,
 )
@@ -132,3 +134,27 @@ async def test_adapter_version_and_route_are_pinned(
         ):
             with pytest.raises(AdapterMismatch):
                 await runtime.reconcile(operation.key, tool=changed)
+
+
+@pytest.mark.parametrize("different", ["tenant", "account", "resource", "effect"])
+async def test_only_matching_scope_is_blocked(
+    different: str, tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class DeclaredTool:
+        name = "declared-test-tool"
+        contract_version = "1"
+
+        def validate(self, candidate: Operation) -> None:
+            pass
+
+        async def execute(self, record: OperationRecord) -> Observation:
+            return Observation.unknown(record, reason="No outcome available.")
+
+        async def observe(self, record: OperationRecord) -> Observation:
+            return Observation.unknown(record, reason="No outcome available.")
+
+    scope = replace(operation.scope, **{different: "different"})
+    independent = replace(operation, operation_id="independent", scope=scope)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
+        assert isinstance(await runtime.perform(independent, tool=DeclaredTool()), Unresolved)
