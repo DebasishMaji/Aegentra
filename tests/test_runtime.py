@@ -8,6 +8,7 @@ from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
+    EvidenceMismatch,
     IntentConflict,
     Knowledge,
     Observation,
@@ -158,3 +159,20 @@ async def test_only_matching_scope_is_blocked(
     with Runtime(tmp_path / "agent.sqlite3") as runtime:
         await runtime.perform(operation, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
         assert isinstance(await runtime.perform(independent, tool=DeclaredTool()), Unresolved)
+
+
+async def test_observation_from_another_operation_is_rejected(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class WrongEvidence(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            return replace(
+                await super().execute(record),
+                key=replace(record.key, operation_id="different"),
+            )
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        with pytest.raises(EvidenceMismatch):
+            await runtime.perform(operation, tool=WrongEvidence(ledger))
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+    assert len(ledger.refunds()) == 1
