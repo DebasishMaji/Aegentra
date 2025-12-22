@@ -14,6 +14,7 @@ from aegentra import (
     Observation,
     Operation,
     OperationRecord,
+    Phase,
     Runtime,
     Unresolved,
 )
@@ -176,3 +177,16 @@ async def test_observation_from_another_operation_is_rejected(
             await runtime.perform(operation, tool=WrongEvidence(ledger))
         assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
     assert len(ledger.refunds()) == 1
+
+
+async def test_wrong_payload_evidence_is_rejected(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class WrongPayload(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            return replace(await super().execute(record), payload_digest="incorrect")
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        with pytest.raises(EvidenceMismatch):
+            await runtime.perform(operation, tool=WrongPayload(ledger))
+        assert runtime.inspect(operation.key).phase is Phase.RESERVED
