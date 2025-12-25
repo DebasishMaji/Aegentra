@@ -190,3 +190,20 @@ async def test_wrong_payload_evidence_is_rejected(
         with pytest.raises(EvidenceMismatch):
             await runtime.perform(operation, tool=WrongPayload(ledger))
         assert runtime.inspect(operation.key).phase is Phase.RESERVED
+
+
+async def test_unexpected_exception_does_not_mean_no_effect(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class BrokenResponse(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            await super().execute(record)
+            raise OSError("Connection lost after provider commit")
+
+    tool = BrokenResponse(ledger)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        with pytest.raises(OSError, match="after provider commit"):
+            await runtime.perform(operation, tool=tool)
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+        assert isinstance(await runtime.perform(operation, tool=tool), ConfirmedApplied)
+    assert len(ledger.refunds()) == 1
