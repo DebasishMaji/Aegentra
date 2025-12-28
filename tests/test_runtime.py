@@ -207,3 +207,25 @@ async def test_unexpected_exception_does_not_mean_no_effect(
         assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
         assert isinstance(await runtime.perform(operation, tool=tool), ConfirmedApplied)
     assert len(ledger.refunds()) == 1
+
+
+async def test_observation_failure_preserves_scope_and_surfaces_the_error(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class UnavailableLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise ConnectionError("Provider status endpoint is unavailable")
+
+    tool = UnavailableLookup(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        assert isinstance(await runtime.perform(operation, tool=tool), Unresolved)
+        with pytest.raises(ConnectionError, match="status endpoint"):
+            await runtime.reconcile(operation.key, tool=tool)
+        record = runtime.inspect(operation.key)
+        assert record.knowledge is Knowledge.UNKNOWN
+        assert record.phase is Phase.RECONCILING
+        blocked = await runtime.perform(
+            replace(operation, operation_id="another-attempt"), tool=RefundTool(ledger)
+        )
+        assert isinstance(blocked, BlockedByUnresolvedEffect)
+    assert len(ledger.refunds()) == 1
