@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 
@@ -228,4 +229,29 @@ async def test_observation_failure_preserves_scope_and_surfaces_the_error(
             replace(operation, operation_id="another-attempt"), tool=RefundTool(ledger)
         )
         assert isinstance(blocked, BlockedByUnresolvedEffect)
+    assert len(ledger.refunds()) == 1
+
+
+async def test_cancellation_preserves_the_possibly_dispatched_operation(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    committed = asyncio.Event()
+    never = asyncio.Event()
+
+    class SlowResponse(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            observation = await super().execute(record)
+            committed.set()
+            await never.wait()
+            return observation
+
+    tool = SlowResponse(ledger)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        task = asyncio.create_task(runtime.perform(operation, tool=tool))
+        await asyncio.wait_for(committed.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+        assert isinstance(await runtime.perform(operation, tool=tool), ConfirmedApplied)
     assert len(ledger.refunds()) == 1
