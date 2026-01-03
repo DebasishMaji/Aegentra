@@ -17,6 +17,7 @@ from aegentra import (
     OperationRecord,
     Phase,
     Runtime,
+    RuntimeUsageError,
     Unresolved,
 )
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
@@ -254,4 +255,35 @@ async def test_cancellation_preserves_the_possibly_dispatched_operation(
             await task
         assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
         assert isinstance(await runtime.perform(operation, tool=tool), ConfirmedApplied)
+    assert len(ledger.refunds()) == 1
+
+
+async def test_live_concurrent_calls_do_not_dispatch_again(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    committed = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowResponse(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            observation = await super().execute(record)
+            committed.set()
+            await release.wait()
+            return observation
+
+    tool = SlowResponse(ledger)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        task = asyncio.create_task(runtime.perform(operation, tool=tool))
+        try:
+            await asyncio.wait_for(committed.wait(), timeout=5)
+            assert isinstance(await runtime.perform(operation, tool=tool), Unresolved)
+            blocked = await runtime.perform(
+                replace(operation, operation_id="concurrent"), tool=tool
+            )
+            assert isinstance(blocked, BlockedByUnresolvedEffect)
+            with pytest.raises(RuntimeUsageError, match="active operations"):
+                runtime.close()
+        finally:
+            release.set()
+            await task
     assert len(ledger.refunds()) == 1
