@@ -287,3 +287,29 @@ async def test_live_concurrent_calls_do_not_dispatch_again(
             release.set()
             await task
     assert len(ledger.refunds()) == 1
+
+
+async def test_arguments_are_snapshotted_before_execution(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    arguments = {"amount_minor": 5000, "currency": "USD"}
+    mutable = replace(operation, arguments=arguments)
+
+    class PausedTool(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            entered.set()
+            await release.wait()
+            return await super().execute(record)
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        task = asyncio.create_task(runtime.perform(mutable, tool=PausedTool(ledger)))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            arguments["amount_minor"] = 9999
+        finally:
+            release.set()
+        result = await task
+        assert isinstance(result, ConfirmedApplied)
+        assert result.receipt["amount_minor"] == 5000
