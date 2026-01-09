@@ -313,3 +313,15 @@ async def test_arguments_are_snapshotted_before_execution(
         result = await task
         assert isinstance(result, ConfirmedApplied)
         assert result.receipt["amount_minor"] == 5000
+
+
+async def test_invalid_adapter_arguments_do_not_reserve_scope(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        invalid = replace(operation, arguments={"amount_minor": True, "currency": "USD"})
+        with pytest.raises(ValueError, match="amount_minor"):
+            await runtime.perform(invalid, tool=RefundTool(ledger))
+        assert isinstance(
+            await runtime.perform(operation, tool=RefundTool(ledger)), ConfirmedApplied
+        )
