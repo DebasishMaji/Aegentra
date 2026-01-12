@@ -325,3 +325,15 @@ async def test_invalid_adapter_arguments_do_not_reserve_scope(
         assert isinstance(
             await runtime.perform(operation, tool=RefundTool(ledger)), ConfirmedApplied
         )
+
+
+async def test_canonical_mapping_order_does_not_change_intent(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger))
+        reordered = replace(operation, arguments={"currency": "USD", "amount_minor": 5000})
+        assert isinstance(
+            await runtime.perform(reordered, tool=RefundTool(ledger)), ConfirmedApplied
+        )
+    assert len(ledger.refunds()) == 1
