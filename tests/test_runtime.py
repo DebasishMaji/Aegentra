@@ -9,6 +9,7 @@ from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
+    EffectScope,
     EvidenceMismatch,
     IntentConflict,
     Knowledge,
@@ -337,3 +338,8 @@ async def test_canonical_mapping_order_does_not_change_intent(
             await runtime.perform(reordered, tool=RefundTool(ledger)), ConfirmedApplied
         )
     assert len(ledger.refunds()) == 1
+
+
+def test_scope_requires_explicit_nonempty_fields() -> None:
+    with pytest.raises(ValueError, match="tenant"):
+        EffectScope("", "payments", "order-42", "refund")
