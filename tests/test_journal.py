@@ -7,6 +7,7 @@ from aegentra import (
     OperationKey,
     OperationNotFound,
     Runtime,
+    RuntimeUsageError,
 )
 
 
@@ -23,3 +24,11 @@ def test_missing_operation_is_an_explicit_error(tmp_path: Path) -> None:
     with Runtime(tmp_path / "agent.sqlite3") as runtime:
         with pytest.raises(OperationNotFound):
             runtime.inspect(OperationKey("tenant", "account", "absent"))
+
+
+def test_closed_runtime_cannot_be_used(tmp_path: Path) -> None:
+    runtime = Runtime(tmp_path / "agent.sqlite3")
+    runtime.close()
+    runtime.close()
+    with pytest.raises(RuntimeUsageError, match="closed"):
+        runtime.inspect(OperationKey("tenant", "account", "absent"))
