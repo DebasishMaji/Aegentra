@@ -43,3 +43,16 @@ def test_unsupported_schema_fails_and_releases_ownership(tmp_path: Path) -> None
     for _ in range(2):
         with pytest.raises(JournalVersionError, match="999"):
             Runtime(path)
+
+
+def test_unrecognized_database_is_not_initialized(tmp_path: Path) -> None:
+    path = tmp_path / "someone-elses.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE important_data (value TEXT)")
+    with pytest.raises(JournalVersionError, match="unrecognized"):
+        Runtime(path)
+    with sqlite3.connect(path) as db:
+        names = {
+            row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        assert names == {"important_data"}
