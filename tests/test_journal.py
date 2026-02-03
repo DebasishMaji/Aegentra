@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -56,3 +57,19 @@ def test_unrecognized_database_is_not_initialized(tmp_path: Path) -> None:
             row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
         assert names == {"important_data"}
+
+
+def test_runtime_rejects_another_thread(tmp_path: Path) -> None:
+    errors: list[Exception] = []
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+
+        def inspect() -> None:
+            try:
+                runtime.inspect(OperationKey("tenant", "account", "absent"))
+            except RuntimeUsageError as error:
+                errors.append(error)
+
+        thread = threading.Thread(target=inspect)
+        thread.start()
+        thread.join()
+    assert len(errors) == 1
