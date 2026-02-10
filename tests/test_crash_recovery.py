@@ -72,3 +72,25 @@ def test_process_death_never_turns_into_fresh_dispatch(tmp_path: Path, boundary:
         else:
             assert isinstance(result, Unresolved)
             assert ledger.refunds() == ()
+
+
+def test_second_process_cannot_take_over_a_live_journal(tmp_path: Path) -> None:
+    path = tmp_path / "agent.sqlite3"
+    program = """
+import sys
+from aegentra import JournalInUse, Runtime
+try:
+    Runtime(sys.argv[1])
+except JournalInUse:
+    sys.exit(17)
+sys.exit(1)
+"""
+    with Runtime(path):
+        process = subprocess.run(
+            [sys.executable, "-c", program, str(path)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    assert process.returncode == 17, process.stderr
