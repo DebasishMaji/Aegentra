@@ -11,6 +11,7 @@ from .errors import (
     RuntimeUsageError,
 )
 from .models import (
+    BlockedAction,
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
@@ -33,6 +34,7 @@ __all__ = [
     "JSONValue",
     "AdapterMismatch",
     "AegentraError",
+    "BlockedAction",
     "BlockedByUnresolvedEffect",
     "ConfirmedApplied",
     "ConfirmedNotApplied",

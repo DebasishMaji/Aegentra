@@ -204,8 +204,22 @@ Outcome: TypeAlias = ConfirmedApplied | ConfirmedNotApplied | Unresolved | Block
 
 
 @dataclass(frozen=True, slots=True)
+class BlockedAction:
+    """A rejected proposal, not a reserved dispatch or an operation record."""
+
+    requested_key: OperationKey
+    tool_name: str
+    contract_version: str
+
+    def __post_init__(self) -> None:
+        _nonempty(self.tool_name, "tool_name")
+        _nonempty(self.contract_version, "contract_version")
+
+
+@dataclass(frozen=True, slots=True)
 class JournalEvent:
     sequence: int
     kind: str
     reason: str
     recorded_at: str
+    blocked_action: BlockedAction | None = None

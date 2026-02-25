@@ -19,6 +19,7 @@ from .errors import (
     OperationNotFound,
 )
 from .models import (
+    BlockedAction,
     BlockedByUnresolvedEffect,
     EffectScope,
     JournalEvent,
@@ -30,8 +31,8 @@ from .models import (
     Phase,
 )
 
-_SCHEMA_VERSION = 1
-_SCHEMA = (
+_SCHEMA_VERSION = 2
+_SCHEMA_V1 = (
     """
     CREATE TABLE operations (
         tenant TEXT NOT NULL,
@@ -72,6 +73,23 @@ _SCHEMA = (
     )
     """,
     "CREATE INDEX operation_events ON events (tenant, account, operation_id, sequence)",
+)
+_UPGRADE_V1_TO_V2 = (
+    "ALTER TABLE events ADD COLUMN requested_operation_id TEXT",
+    "ALTER TABLE events ADD COLUMN requested_tool_name TEXT",
+    """
+    ALTER TABLE events ADD COLUMN requested_contract_version TEXT CHECK (
+        (kind = 'effect_blocked'
+            AND requested_operation_id IS NOT NULL
+            AND requested_tool_name IS NOT NULL
+            AND requested_contract_version IS NOT NULL)
+        OR
+        (kind != 'effect_blocked'
+            AND requested_operation_id IS NULL
+            AND requested_tool_name IS NULL
+            AND requested_contract_version IS NULL)
+    )
+    """,
 )
 
 
@@ -142,15 +160,19 @@ class Journal:
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
         if version == _SCHEMA_VERSION:
             return
-        if version != 0:
+        if version not in (0, 1):
             raise JournalVersionError(f"Unsupported journal version {version}.")
-        tables = self._db.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchall()
-        if tables:
-            raise JournalVersionError("Refusing to initialize an unrecognized database.")
         with self._transaction():
-            for statement in _SCHEMA:
+            if version == 0:
+                tables = self._db.execute(
+                    """SELECT name FROM sqlite_master
+                       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"""
+                ).fetchall()
+                if tables:
+                    raise JournalVersionError("Refusing to initialize an unrecognized database.")
+                for statement in _SCHEMA_V1:
+                    self._db.execute(statement)
+            for statement in _UPGRADE_V1_TO_V2:
                 self._db.execute(statement)
             self._db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
@@ -193,7 +215,15 @@ class Journal:
                 (scope.tenant, scope.account, scope.resource, scope.effect),
             ).fetchone()
             if blocker is not None:
-                return BlockedByUnresolvedEffect(key, _record(blocker))
+                blocking_operation = _record(blocker)
+                self._event(
+                    blocking_operation.key,
+                    "effect_blocked",
+                    "A proposed write conflicts with this unresolved effect scope.",
+                    _now(),
+                    blocked_action=BlockedAction(key, tool_name, contract_version),
+                )
+                return BlockedByUnresolvedEffect(key, blocking_operation)
 
             now = _now()
             reason = "Dispatch reserved; no provider outcome has been established."
@@ -266,19 +296,58 @@ class Journal:
             self._event(record.key, f"observed_{observation.knowledge}", observation.reason, now)
             return self.get(record.key)
 
-    def _event(self, key: OperationKey, kind: str, reason: str, now: str) -> None:
+    def _event(
+        self,
+        key: OperationKey,
+        kind: str,
+        reason: str,
+        now: str,
+        *,
+        blocked_action: BlockedAction | None = None,
+    ) -> None:
         self._db.execute(
             """INSERT INTO events
-               (tenant, account, operation_id, kind, reason, recorded_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (*_key_values(key), kind, reason, now),
+               (tenant, account, operation_id, kind, reason, recorded_at,
+                requested_operation_id, requested_tool_name, requested_contract_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                *_key_values(key),
+                kind,
+                reason,
+                now,
+                blocked_action.requested_key.operation_id if blocked_action else None,
+                blocked_action.tool_name if blocked_action else None,
+                blocked_action.contract_version if blocked_action else None,
+            ),
         )
 
     def events(self, key: OperationKey) -> tuple[JournalEvent, ...]:
         self.get(key)
         rows = self._db.execute(
-            """SELECT sequence, kind, reason, recorded_at FROM events
+            """SELECT sequence, kind, reason, recorded_at,
+                      requested_operation_id, requested_tool_name, requested_contract_version
+               FROM events
                WHERE tenant = ? AND account = ? AND operation_id = ? ORDER BY sequence""",
             _key_values(key),
         ).fetchall()
-        return tuple(JournalEvent(*row) for row in rows)
+        result: list[JournalEvent] = []
+        for row in rows:
+            blocked_action = (
+                BlockedAction(
+                    OperationKey(key.tenant, key.account, row["requested_operation_id"]),
+                    row["requested_tool_name"],
+                    row["requested_contract_version"],
+                )
+                if row["requested_operation_id"] is not None
+                else None
+            )
+            result.append(
+                JournalEvent(
+                    row["sequence"],
+                    row["kind"],
+                    row["reason"],
+                    row["recorded_at"],
+                    blocked_action,
+                )
+            )
+        return tuple(result)

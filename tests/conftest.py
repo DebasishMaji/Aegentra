@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -19,3 +20,12 @@ def operation() -> Operation:
 @pytest.fixture
 def ledger(tmp_path: Path) -> RefundLedger:
     return RefundLedger(tmp_path / "provider.sqlite3")
+
+
+@pytest.fixture
+def legacy_journal(tmp_path: Path) -> Path:
+    path = tmp_path / "legacy.sqlite3"
+    schema = Path(__file__).with_name("fixtures") / "journal_v1.sql"
+    with sqlite3.connect(path) as db:
+        db.executescript(schema.read_text())
+    return path
