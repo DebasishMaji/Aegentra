@@ -60,3 +60,27 @@ async def test_blocked_proposal_is_durable_without_reserving_an_operation(
         assert "replanned-approval" not in persisted_events
         assert db.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 1
     assert len(ledger.refunds()) == 1
+
+
+async def test_each_blocked_proposal_gets_its_own_event(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        tool = RefundTool(ledger, Scenario.UNOBSERVABLE)
+        await runtime.perform(operation, tool=tool)
+        proposals = [
+            replace(operation, operation_id="replan-1"),
+            replace(operation, operation_id="replan-2"),
+            replace(operation, operation_id="replan-1"),
+        ]
+        for proposal in proposals:
+            result = await runtime.perform(proposal, tool=RefundTool(ledger, name="refund_order"))
+            assert isinstance(result, BlockedByUnresolvedEffect)
+        blocked = [
+            event for event in runtime.events(operation.key) if event.blocked_action is not None
+        ]
+        assert [event.blocked_action.requested_key for event in blocked] == [
+            proposal.key for proposal in proposals
+        ]
+        assert len({event.sequence for event in blocked}) == 3
+    assert len(ledger.refunds()) == 1
