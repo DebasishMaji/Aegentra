@@ -84,3 +84,16 @@ async def test_each_blocked_proposal_gets_its_own_event(
         ]
         assert len({event.sequence for event in blocked}) == 3
     assert len(ledger.refunds()) == 1
+
+
+async def test_another_tenant_does_not_create_a_blocked_event(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    other_tenant = replace(operation, scope=replace(operation.scope, tenant="tenant-b"))
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
+        result = await runtime.perform(other_tenant, tool=RefundTool(ledger))
+        assert isinstance(result, ConfirmedApplied)
+        assert all(event.blocked_action is None for event in runtime.events(operation.key))
+        assert all(event.blocked_action is None for event in runtime.events(other_tenant.key))
+    assert len(ledger.refunds()) == 2
