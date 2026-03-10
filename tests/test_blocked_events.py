@@ -97,3 +97,26 @@ async def test_another_tenant_does_not_create_a_blocked_event(
         assert all(event.blocked_action is None for event in runtime.events(operation.key))
         assert all(event.blocked_action is None for event in runtime.events(other_tenant.key))
     assert len(ledger.refunds()) == 2
+
+
+async def test_failure_to_persist_a_block_is_not_reported_as_a_recorded_decision(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path) as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
+        before = runtime.events(operation.key)
+        with sqlite3.connect(path) as db:
+            db.executescript(
+                """CREATE TRIGGER reject_block_event BEFORE INSERT ON events
+                   WHEN NEW.kind = 'effect_blocked'
+                   BEGIN SELECT RAISE(ABORT, 'injected event write failure'); END;"""
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="injected event write failure"):
+            await runtime.perform(
+                replace(operation, operation_id="replan"),
+                tool=RefundTool(ledger, name="refund_order"),
+            )
+        assert runtime.events(operation.key) == before
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+    assert len(ledger.refunds()) == 1
