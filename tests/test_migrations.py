@@ -2,10 +2,14 @@ import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
+    ConfirmedNotApplied,
     Knowledge,
+    Observation,
     Operation,
     OperationRecord,
     Phase,
@@ -102,3 +106,27 @@ async def test_v1_upgrade_preserves_an_uncertain_effect_and_event_sequence(
     with sqlite3.connect(legacy_journal) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 2
     assert len(ledger.refunds()) == 1
+
+
+@pytest.mark.parametrize("knowledge", [Knowledge.APPLIED, Knowledge.NOT_APPLIED_FINAL])
+async def test_v1_settled_results_are_preserved_without_provider_calls(
+    legacy_journal: Path, operation: Operation, ledger: RefundLedger, knowledge: Knowledge
+) -> None:
+    original = _seed_operation(legacy_journal, operation, knowledge)
+
+    class MustNotCallProvider(RefundTool):
+        async def execute(self, record: OperationRecord) -> Observation:
+            raise AssertionError("A settled operation must not execute.")
+
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise AssertionError("A settled operation must not observe.")
+
+    with Runtime(legacy_journal) as runtime:
+        assert runtime.inspect(operation.key) == original
+        result = await runtime.perform(operation, tool=MustNotCallProvider(ledger))
+        if knowledge is Knowledge.APPLIED:
+            assert isinstance(result, ConfirmedApplied)
+            assert result.receipt == {"provider_id": "legacy-refund"}
+        else:
+            assert isinstance(result, ConfirmedNotApplied)
+        assert len(runtime.events(operation.key)) == 1
