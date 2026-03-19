@@ -130,3 +130,20 @@ async def test_v1_settled_results_are_preserved_without_provider_calls(
         else:
             assert isinstance(result, ConfirmedNotApplied)
         assert len(runtime.events(operation.key)) == 1
+
+
+def test_failed_upgrade_rolls_back_all_schema_changes_and_releases_ownership(
+    legacy_journal: Path, operation: Operation
+) -> None:
+    _seed_operation(legacy_journal, operation)
+    with sqlite3.connect(legacy_journal) as db:
+        db.execute("ALTER TABLE events ADD COLUMN requested_tool_name TEXT")
+        original_columns = list(db.execute("PRAGMA table_info(events)"))
+    for _ in range(2):
+        with pytest.raises(sqlite3.OperationalError, match="duplicate column"):
+            Runtime(legacy_journal)
+        with sqlite3.connect(legacy_journal) as db:
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert list(db.execute("PRAGMA table_info(events)")) == original_columns
+            assert db.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 1
+            assert db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
