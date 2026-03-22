@@ -147,3 +147,15 @@ def test_failed_upgrade_rolls_back_all_schema_changes_and_releases_ownership(
             assert list(db.execute("PRAGMA table_info(events)")) == original_columns
             assert db.execute("SELECT COUNT(*) FROM operations").fetchone()[0] == 1
             assert db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
+
+
+def test_reopening_an_upgraded_journal_does_not_repeat_the_upgrade(legacy_journal: Path) -> None:
+    for _ in range(2):
+        with Runtime(legacy_journal):
+            pass
+        with sqlite3.connect(legacy_journal) as db:
+            columns = [row[1] for row in db.execute("PRAGMA table_info(events)")]
+            assert columns.count("requested_operation_id") == 1
+            assert columns.count("requested_tool_name") == 1
+            assert columns.count("requested_contract_version") == 1
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 2
