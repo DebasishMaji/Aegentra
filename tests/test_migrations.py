@@ -1,4 +1,7 @@
+import asyncio
 import sqlite3
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -159,3 +162,54 @@ def test_reopening_an_upgraded_journal_does_not_repeat_the_upgrade(legacy_journa
             assert columns.count("requested_tool_name") == 1
             assert columns.count("requested_contract_version") == 1
             assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "ALTER TABLE events ADD COLUMN requested_tool_name",
+        "PRAGMA user_version = 2",
+    ],
+)
+def test_process_death_during_upgrade_preserves_the_previous_journal(
+    legacy_journal: Path, operation: Operation, ledger: RefundLedger, boundary: str
+) -> None:
+    original = _seed_operation(legacy_journal, operation)
+    ledger.submit(original, state="applied")
+    with sqlite3.connect(legacy_journal) as db:
+        original_columns = list(db.execute("PRAGMA table_info(events)"))
+
+    program = """
+import os
+import sys
+from pathlib import Path
+from aegentra.journal import Journal
+
+class InterruptedUpgrade(Journal):
+    def _initialize(self):
+        def interrupt(statement):
+            if statement.strip().startswith(sys.argv[2]):
+                os._exit(74)
+        self._db.set_trace_callback(interrupt)
+        super()._initialize()
+
+InterruptedUpgrade(Path(sys.argv[1]))
+"""
+    process = subprocess.run(
+        [sys.executable, "-c", program, str(legacy_journal), boundary],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert process.returncode == 74, process.stderr
+    with sqlite3.connect(legacy_journal) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert list(db.execute("PRAGMA table_info(events)")) == original_columns
+
+    with Runtime(legacy_journal) as runtime:
+        assert runtime.inspect(operation.key) == original
+        result = asyncio.run(runtime.perform(operation, tool=RefundTool(ledger)))
+        assert isinstance(result, ConfirmedApplied)
+        assert runtime.events(operation.key)[0].sequence == 41
+    assert len(ledger.refunds()) == 1
