@@ -26,6 +26,8 @@ validate and snapshot arguments
 BEGIN IMMEDIATE
   check existing identity and intent binding
   check unresolved effect scope
+    if blocked: append effect_blocked event to the blocking operation and COMMIT
+                return without reserving or invoking the proposed write
   insert UNKNOWN / RESERVED
   append dispatch_reserved event
 COMMIT
@@ -88,6 +90,27 @@ callbacks and handle stale or reordered delivery explicitly.
 The event history records transitions and their reasons. It is not a signed,
 tamper-proof audit log and does not retain arbitrary raw provider responses.
 
+## Blocked proposals
+
+An `effect_blocked` event belongs to the operation retaining the unresolved scope,
+not to the rejected proposal. Its `BlockedAction` metadata carries the proposed
+operation key, tool name, and contract version. It does not store the rejected
+arguments or approval reference.
+
+The scope check and event write share a transaction. The runtime returns
+`BlockedByUnresolvedEffect` only after that decision commits. A journal write
+failure propagates; it does not dispatch the proposed tool or claim the decision
+was durably recorded.
+
+Blocking does not change the original operation's knowledge, phase, or timestamps.
+Repeated proposals produce separate ordered events, including repeated proposals
+with the same new ID. A blocked proposal is not an execution attempt and has no
+operation row. Its history is available through the blocking operation's key.
+
+When reconciliation settles the original operation, the recorded proposals remain
+in its history. They are not automatically executed afterward. Cross-tenant or
+unrelated-scope operations do not produce blocked events on this operation.
+
 ## Crash boundaries
 
 | Interruption | Recovery |
@@ -130,9 +153,16 @@ The journal uses SQLite WAL mode and `synchronous=FULL` on a local filesystem.
 These are not claims about arbitrary disks, network filesystems, or hardware
 that does not honor synchronization.
 
-The journal schema is versioned. An unknown version or an unrelated database
-fails explicitly. Existing operations pin the tool name and contract version;
-new adapter code must not silently reinterpret an old unresolved record.
+The journal schema is versioned. Schema 1 journals are upgraded to schema 2 on
+open, adding structured blocked-proposal metadata to events. The upgrade and
+version marker commit in one transaction. A failure rolls back the schema changes
+and leaves the old version intact. Existing outcomes, payloads, timestamps, and
+event sequence numbers are preserved; old events have no blocked-action metadata.
+
+An unknown version or an unrelated database fails explicitly. Existing operations
+pin the tool name and contract version; a journal upgrade does not change those
+contracts or make an unresolved operation retryable. An older runtime cannot
+open the upgraded schema. Back up important journals before changing versions.
 
 New database and lock files use mode `0600`. Existing permissions are preserved.
 Arguments and receipts are plaintext. File permissions do not provide encryption
@@ -140,7 +170,7 @@ or tenant-level access control. Use deployment-level protections and keep
 credentials out of payloads.
 
 No automatic retention deletes unresolved operations. The alpha has no pruning
-API, backup coordination, or supported schema migration path.
+API, backup coordination, or downgrade path.
 
 ## Deliberate limits
 
