@@ -28,6 +28,10 @@ deduplicate writes.
 That is enough to make important counterexamples executable. It is not enough
 to substantiate a broad reliability claim.
 
+Blocked replanning proposals are retained in the original operation's event
+history. Count these separately from provider attempts and actual effects: a
+rejected proposal is not a duplicate execution.
+
 ## Evaluation plan
 
 Compare correctly configured durable execution and provider idempotency, a pinned
