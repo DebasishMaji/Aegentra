@@ -42,6 +42,13 @@ async def demonstrate(directory: Path) -> None:
             raise RuntimeError("Provider evidence should resolve the original refund.")
         print("After restart, the agent confirms the existing refund without another write.")
         print(f"Actual refunds: {len(ledger.refunds())}")
+        for event in restarted.events(original.key):
+            if event.blocked_action is not None:
+                proposal = event.blocked_action
+                print(
+                    f"Blocked proposal retained: {proposal.tool_name} "
+                    f"({proposal.requested_key.operation_id})"
+                )
         print("Journal:", " -> ".join(event.kind for event in restarted.events(original.key)))
 
 
