@@ -84,6 +84,21 @@ Recovery requires the original tool name and contract version.
 `await runtime.reconcile(operation.key, tool=refund_tool)` performs an explicit
 read-only lookup.
 
+Blocked proposals are recorded as `effect_blocked` events on the **blocking**
+operation. Their `blocked_action` field identifies the requested operation, tool,
+and contract version. The rejected payload and approval reference are not copied
+into the event, and no dispatch is reserved for that proposal.
+
+```python
+for event in runtime.events(operation.key):
+    if event.blocked_action is not None:
+        proposal = event.blocked_action
+        print(proposal.requested_key.operation_id, proposal.tool_name)
+```
+
+These decisions survive restart and remain in the history after the original
+operation is reconciled.
+
 ## Writing an adapter
 
 An adapter implements four things:
@@ -132,6 +147,8 @@ in arguments. Existing file permissions are not changed.
 
 The execution model, crash boundaries, and limits are in
 [`docs/semantics.md`](docs/semantics.md).
+Journals from the initial schema are upgraded transactionally on open; unsupported
+versions still fail explicitly.
 
 ## Research direction
 
