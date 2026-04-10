@@ -1,5 +1,7 @@
 # Contributing
 
+Contributions are licensed under Apache 2.0, as described in [LICENSE](LICENSE).
+
 Start with a failure trace, not another abstraction.
 
 Changes to dispatch, intent binding, or finality should include a small scenario

@@ -182,4 +182,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before changing dispatch or finality rule
 
 ## License
 
-A distribution license has not been selected yet.
+Licensed under [Apache 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
