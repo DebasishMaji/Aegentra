@@ -10,18 +10,17 @@ from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ._read import decode_record, get_events, get_record, key_values
 from .errors import (
     AdapterMismatch,
     EvidenceMismatch,
     IntentConflict,
     JournalInUse,
     JournalVersionError,
-    OperationNotFound,
 )
 from .models import (
     BlockedAction,
     BlockedByUnresolvedEffect,
-    EffectScope,
     JournalEvent,
     Knowledge,
     Observation,
@@ -97,27 +96,6 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _key_values(key: OperationKey) -> tuple[str, str, str]:
-    return key.tenant, key.account, key.operation_id
-
-
-def _record(row: sqlite3.Row) -> OperationRecord:
-    return OperationRecord(
-        key=OperationKey(row["tenant"], row["account"], row["operation_id"]),
-        scope=EffectScope(row["tenant"], row["account"], row["resource"], row["effect"]),
-        approval_ref=row["approval_ref"],
-        tool_name=row["tool_name"],
-        contract_version=row["contract_version"],
-        payload_json=row["payload_json"],
-        knowledge=Knowledge(row["knowledge"]),
-        phase=Phase(row["phase"]),
-        reason=row["reason"],
-        receipt_json=row["receipt_json"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
-
-
 class Journal:
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
@@ -177,13 +155,7 @@ class Journal:
             self._db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def get(self, key: OperationKey) -> OperationRecord:
-        row = self._db.execute(
-            "SELECT * FROM operations WHERE tenant = ? AND account = ? AND operation_id = ?",
-            _key_values(key),
-        ).fetchone()
-        if row is None:
-            raise OperationNotFound(f"No operation {key!r}.")
-        return _record(row)
+        return get_record(self._db, key)
 
     def reserve(
         self, operation: Operation, payload: str, tool_name: str, contract_version: str
@@ -192,10 +164,10 @@ class Journal:
         with self._transaction():
             existing = self._db.execute(
                 "SELECT * FROM operations WHERE tenant = ? AND account = ? AND operation_id = ?",
-                _key_values(key),
+                key_values(key),
             ).fetchone()
             if existing is not None:
-                record = _record(existing)
+                record = decode_record(existing)
                 if (
                     record.scope != operation.scope
                     or record.approval_ref != operation.approval_ref
@@ -215,7 +187,7 @@ class Journal:
                 (scope.tenant, scope.account, scope.resource, scope.effect),
             ).fetchone()
             if blocker is not None:
-                blocking_operation = _record(blocker)
+                blocking_operation = decode_record(blocker)
                 self._event(
                     blocking_operation.key,
                     "effect_blocked",
@@ -232,7 +204,7 @@ class Journal:
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unknown', 'reserved', ?, NULL, ?, ?
                 )""",
                 (
-                    *_key_values(key),
+                    *key_values(key),
                     scope.resource,
                     scope.effect,
                     operation.approval_ref,
@@ -262,7 +234,7 @@ class Journal:
                 """UPDATE operations SET phase = 'reconciling', updated_at = ?
                    WHERE tenant = ? AND account = ? AND operation_id = ?
                      AND knowledge = 'unknown'""",
-                (now, *_key_values(key)),
+                (now, *key_values(key)),
             )
             self._event(key, "reconciliation_started", "Read-only provider lookup started.", now)
             return self.get(key)
@@ -290,7 +262,7 @@ class Journal:
                     observation.reason,
                     observation.receipt_json,
                     now,
-                    *_key_values(record.key),
+                    *key_values(record.key),
                 ),
             )
             self._event(record.key, f"observed_{observation.knowledge}", observation.reason, now)
@@ -311,7 +283,7 @@ class Journal:
                 requested_operation_id, requested_tool_name, requested_contract_version)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                *_key_values(key),
+                *key_values(key),
                 kind,
                 reason,
                 now,
@@ -322,32 +294,4 @@ class Journal:
         )
 
     def events(self, key: OperationKey) -> tuple[JournalEvent, ...]:
-        self.get(key)
-        rows = self._db.execute(
-            """SELECT sequence, kind, reason, recorded_at,
-                      requested_operation_id, requested_tool_name, requested_contract_version
-               FROM events
-               WHERE tenant = ? AND account = ? AND operation_id = ? ORDER BY sequence""",
-            _key_values(key),
-        ).fetchall()
-        result: list[JournalEvent] = []
-        for row in rows:
-            blocked_action = (
-                BlockedAction(
-                    OperationKey(key.tenant, key.account, row["requested_operation_id"]),
-                    row["requested_tool_name"],
-                    row["requested_contract_version"],
-                )
-                if row["requested_operation_id"] is not None
-                else None
-            )
-            result.append(
-                JournalEvent(
-                    row["sequence"],
-                    row["kind"],
-                    row["reason"],
-                    row["recorded_at"],
-                    blocked_action,
-                )
-            )
-        return tuple(result)
+        return get_events(self._db, key)

@@ -223,3 +223,15 @@ class JournalEvent:
     reason: str
     recorded_at: str
     blocked_action: BlockedAction | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OperationPage:
+    records: tuple[OperationRecord, ...]
+    next_cursor: OperationKey | None
+
+
+@dataclass(frozen=True, slots=True)
+class EventPage:
+    events: tuple[JournalEvent, ...]
+    next_sequence: int | None
