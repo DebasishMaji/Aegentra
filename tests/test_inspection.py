@@ -1,4 +1,7 @@
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from aegentra import (
     Inspection,
@@ -25,3 +28,11 @@ async def test_inspection_coexists_with_writer_and_keeps_a_stable_snapshot(
             assert original.knowledge is Knowledge.UNKNOWN
         with Inspection(path) as fresh:
             assert fresh.inspect(operation.key).knowledge is Knowledge.APPLIED
+
+
+def test_missing_journal_is_not_created(tmp_path: Path) -> None:
+    path = tmp_path / "missing.sqlite3"
+    with pytest.raises(sqlite3.OperationalError):
+        Inspection(path)
+    assert not path.exists()
+    assert not Path(f"{path}.lock").exists()
