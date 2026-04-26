@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -63,3 +64,42 @@ async def test_schema_one_is_read_without_migration(
     assert await asyncio.to_thread(legacy_journal.read_bytes) == before
     with sqlite3.connect(legacy_journal) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+async def test_keyset_pages_are_ordered_and_filters_are_parameterized(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "agent.sqlite3"
+    operations = [
+        replace(
+            operation,
+            operation_id=identifier,
+            scope=replace(operation.scope, tenant=tenant, resource=f"order-{tenant}-{identifier}"),
+        )
+        for tenant, identifier in [
+            ("tenant-b", "op-a"),
+            ("tenant-a", "op-c"),
+            ("tenant-a", "op-a"),
+            ("tenant-a", "op-b"),
+        ]
+    ]
+    with Runtime(path) as runtime:
+        for item in operations:
+            await runtime.perform(item, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
+        settled = replace(operation, operation_id="settled")
+        await runtime.perform(settled, tool=RefundTool(ledger))
+
+    with Inspection(path) as reader:
+        first = reader.list_operations(limit=2)
+        assert [item.key.operation_id for item in first.records] == ["op-a", "op-b"]
+        assert first.next_cursor == first.records[-1].key
+        second = reader.list_operations(after=first.next_cursor, limit=2)
+        assert [(item.key.tenant, item.key.operation_id) for item in second.records] == [
+            ("tenant-a", "op-c"),
+            ("tenant-b", "op-a"),
+        ]
+        assert second.next_cursor is None
+        assert len(reader.list_operations(knowledge=None).records) == 5
+        assert len(reader.list_operations(tenant="tenant-b").records) == 1
+        assert reader.list_operations(tenant="tenant-a' OR 1=1 --").records == ()
+        assert reader.list_operations(account="another-account").records == ()
