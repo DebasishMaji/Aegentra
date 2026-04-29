@@ -103,3 +103,25 @@ async def test_keyset_pages_are_ordered_and_filters_are_parameterized(
         assert len(reader.list_operations(tenant="tenant-b").records) == 1
         assert reader.list_operations(tenant="tenant-a' OR 1=1 --").records == ()
         assert reader.list_operations(account="another-account").records == ()
+
+
+async def test_trace_is_paginated_and_payloads_require_opt_in(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path) as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT))
+        await runtime.perform(replace(operation, operation_id="replanned"), tool=RefundTool(ledger))
+    with Inspection(path) as reader:
+        first = reader.events(operation.key, limit=1)
+        assert first.next_sequence == first.events[0].sequence
+        second = reader.events(operation.key, after_sequence=first.next_sequence, limit=2)
+        assert [event.kind for event in second.events] == ["observed_unknown", "effect_blocked"]
+        assert second.next_sequence is None
+        assert second.events[-1].blocked_action.requested_key.operation_id == "replanned"
+        trace = reader.export_trace(operation.key, limit=1)
+        assert trace["format_version"] == 1
+        assert "arguments" not in trace["operation"]
+        assert "receipt" not in trace["operation"]
+        full = reader.export_trace(operation.key, include_payload=True)
+        assert full["operation"]["arguments"] == operation.arguments
