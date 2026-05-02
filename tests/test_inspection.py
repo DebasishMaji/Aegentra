@@ -9,6 +9,7 @@ from aegentra import (
     Inspection,
     Knowledge,
     Operation,
+    OperationKey,
     Runtime,
 )
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
@@ -125,3 +126,15 @@ async def test_trace_is_paginated_and_payloads_require_opt_in(
         assert "receipt" not in trace["operation"]
         full = reader.export_trace(operation.key, include_payload=True)
         assert full["operation"]["arguments"] == operation.arguments
+
+
+@pytest.mark.parametrize("limit", [0, -1, 1001, True, 1.5])
+def test_page_limits_are_bounded(tmp_path: Path, limit: int) -> None:
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path):
+        pass
+    with Inspection(path) as reader:
+        with pytest.raises(ValueError, match="limit"):
+            reader.list_operations(limit=limit)
+        with pytest.raises(ValueError, match="limit"):
+            reader.events(OperationKey("t", "a", "id"), limit=limit)
