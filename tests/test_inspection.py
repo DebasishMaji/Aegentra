@@ -138,3 +138,12 @@ def test_page_limits_are_bounded(tmp_path: Path, limit: int) -> None:
             reader.list_operations(limit=limit)
         with pytest.raises(ValueError, match="limit"):
             reader.events(OperationKey("t", "a", "id"), limit=limit)
+
+
+def test_inspection_connection_cannot_write(tmp_path: Path) -> None:
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path):
+        pass
+    with Inspection(path) as reader:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            reader._db.execute("DELETE FROM operations")
