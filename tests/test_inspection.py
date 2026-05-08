@@ -7,10 +7,12 @@ import pytest
 
 from aegentra import (
     Inspection,
+    JournalVersionError,
     Knowledge,
     Operation,
     OperationKey,
     Runtime,
+    RuntimeUsageError,
 )
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
 
@@ -147,3 +149,18 @@ def test_inspection_connection_cannot_write(tmp_path: Path) -> None:
     with Inspection(path) as reader:
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             reader._db.execute("DELETE FROM operations")
+
+
+def test_closed_inspection_and_unknown_versions_fail_explicitly(tmp_path: Path) -> None:
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path):
+        pass
+    reader = Inspection(path)
+    reader.close()
+    reader.close()
+    with pytest.raises(RuntimeUsageError, match="closed"):
+        reader.list_operations()
+    with sqlite3.connect(path) as db:
+        db.execute("PRAGMA user_version = 999")
+    with pytest.raises(JournalVersionError, match="999"):
+        Inspection(path)
