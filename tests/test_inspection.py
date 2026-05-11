@@ -11,6 +11,7 @@ from aegentra import (
     Knowledge,
     Operation,
     OperationKey,
+    OperationNotFound,
     Runtime,
     RuntimeUsageError,
 )
@@ -164,3 +165,12 @@ def test_closed_inspection_and_unknown_versions_fail_explicitly(tmp_path: Path) 
         db.execute("PRAGMA user_version = 999")
     with pytest.raises(JournalVersionError, match="999"):
         Inspection(path)
+
+
+def test_missing_operation_does_not_return_an_empty_success(tmp_path: Path) -> None:
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path):
+        pass
+    with Inspection(path) as reader:
+        with pytest.raises(OperationNotFound):
+            reader.export_trace(OperationKey("t", "a", "absent"))
