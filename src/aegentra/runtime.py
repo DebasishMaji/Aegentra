@@ -25,6 +25,7 @@ from .models import (
     decode_arguments,
     encode_arguments,
 )
+from .recovery import RecoveryBudget
 from .tool import Tool
 
 
@@ -122,6 +123,48 @@ class Runtime:
             record = self._journal.begin_reconciliation(key)
             observation = await tool.observe(record)
             return _outcome(self._journal.observe(record, observation))
+        finally:
+            self._active.remove(key)
+
+    async def recover(
+        self, key: OperationKey, *, tool: Tool, budget: RecoveryBudget
+    ) -> ConfirmedApplied | ConfirmedNotApplied | Unresolved:
+        """Gather evidence within a cooperative deadline and a lookup allowance."""
+        self._check_loop()
+        record = self._journal.get(key)
+        self._journal.check_adapter(record, tool.name, tool.contract_version)
+        if record.knowledge is not Knowledge.UNKNOWN or key in self._active:
+            return _outcome(record)
+
+        self._active.add(key)
+        observations = 0
+        exhausted = "observation allowance"
+        timeout = asyncio.timeout(budget.timeout_seconds)
+        try:
+            try:
+                async with timeout:
+                    for attempt in range(budget.max_observations):
+                        deadline = timeout.when()
+                        if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                            exhausted = "deadline"
+                            break
+                        record = self._journal.begin_reconciliation(key)
+                        observations += 1
+                        observation = await tool.observe(record)
+                        record = self._journal.observe(record, observation)
+                        if record.knowledge is not Knowledge.UNKNOWN:
+                            return _outcome(record)
+                        if attempt + 1 < budget.max_observations:
+                            await asyncio.sleep(budget.interval_seconds)
+            except TimeoutError:
+                if not timeout.expired():
+                    raise
+                exhausted = "deadline"
+            reason = (
+                f"Read-only recovery {exhausted} exhausted after {observations} lookup(s); "
+                "the effect remains unknown."
+            )
+            return Unresolved(self._journal.exhaust_recovery(key, reason))
         finally:
             self._active.remove(key)
 

@@ -268,6 +268,20 @@ class Journal:
             self._event(record.key, f"observed_{observation.knowledge}", observation.reason, now)
             return self.get(record.key)
 
+    def exhaust_recovery(self, key: OperationKey, reason: str) -> OperationRecord:
+        with self._transaction():
+            current = self.get(key)
+            if current.knowledge is not Knowledge.UNKNOWN:
+                raise EvidenceMismatch("Recovery exhaustion cannot replace a settled outcome.")
+            now = _now()
+            self._db.execute(
+                """UPDATE operations SET phase = 'unresolved', reason = ?, updated_at = ?
+                   WHERE tenant = ? AND account = ? AND operation_id = ?""",
+                (reason, now, *key_values(key)),
+            )
+            self._event(key, "recovery_exhausted", reason, now)
+            return self.get(key)
+
     def _event(
         self,
         key: OperationKey,

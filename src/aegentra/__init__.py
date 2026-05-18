@@ -30,6 +30,7 @@ from .models import (
     Phase,
     Unresolved,
 )
+from .recovery import RecoveryBudget
 from .runtime import Runtime
 from .tool import Tool
 
@@ -59,6 +60,7 @@ __all__ = [
     "Outcome",
     "Phase",
     "Runtime",
+    "RecoveryBudget",
     "RuntimeUsageError",
     "Tool",
     "Unresolved",
