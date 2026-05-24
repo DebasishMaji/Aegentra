@@ -5,6 +5,7 @@ import pytest
 
 from aegentra import (
     BlockedByUnresolvedEffect,
+    ConfirmedApplied,
     Observation,
     Operation,
     OperationRecord,
@@ -44,4 +45,26 @@ async def test_exhaustion_obeys_exact_count_and_survives_restart(
             replace(operation, operation_id="new"), tool=RefundTool(ledger)
         )
         assert isinstance(result, BlockedByUnresolvedEffect)
+    assert len(ledger.refunds()) == 1
+
+
+async def test_recovery_stops_on_evidence_and_replays_without_probes(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    seen = []
+
+    class CountingTool(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            seen.append(record.key)
+            return await super().observe(record)
+
+    tool = CountingTool(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        result = await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget())
+        assert isinstance(result, ConfirmedApplied)
+        assert len(seen) == 1
+        assert await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget()) == result
+        assert len(seen) == 1
+        assert "recovery_exhausted" not in [event.kind for event in runtime.events(operation.key)]
     assert len(ledger.refunds()) == 1
