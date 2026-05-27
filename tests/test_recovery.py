@@ -6,6 +6,7 @@ import pytest
 from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
+    ConfirmedNotApplied,
     Observation,
     Operation,
     OperationRecord,
@@ -68,3 +69,19 @@ async def test_recovery_stops_on_evidence_and_replays_without_probes(
         assert len(seen) == 1
         assert "recovery_exhausted" not in [event.kind for event in runtime.events(operation.key)]
     assert len(ledger.refunds()) == 1
+
+
+async def test_final_rejection_is_replayed_without_probes(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class NoLookups(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise AssertionError("A settled rejection must not need another lookup.")
+
+    tool = NoLookups(ledger, Scenario.REJECTED)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        assert isinstance(
+            await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget()),
+            ConfirmedNotApplied,
+        )
