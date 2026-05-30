@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from aegentra import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
+    Knowledge,
     Observation,
     Operation,
     OperationRecord,
@@ -85,3 +87,30 @@ async def test_final_rejection_is_replayed_without_probes(
             await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget()),
             ConfirmedNotApplied,
         )
+
+
+async def test_deadline_counts_interrupted_lookup_but_does_not_assert_failure(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    seen = []
+    never = asyncio.Event()
+
+    class SlowLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            seen.append(record.key)
+            await never.wait()
+            raise AssertionError("The deadline should interrupt this lookup.")
+
+    tool = SlowLookup(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        result = await asyncio.wait_for(
+            runtime.recover(operation.key, tool=tool, budget=RecoveryBudget(timeout_seconds=0.02)),
+            timeout=5,
+        )
+        assert len(seen) == 1
+        assert isinstance(result, Unresolved)
+        assert result.record.knowledge is Knowledge.UNKNOWN
+        assert result.record.phase is Phase.UNRESOLVED
+        assert "deadline exhausted after 1 lookup(s)" in result.record.reason
+    assert len(ledger.refunds()) == 1
