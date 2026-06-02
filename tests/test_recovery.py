@@ -15,6 +15,7 @@ from aegentra import (
     Phase,
     RecoveryBudget,
     Runtime,
+    RuntimeUsageError,
     Unresolved,
 )
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
@@ -114,3 +115,45 @@ async def test_deadline_counts_interrupted_lookup_but_does_not_assert_failure(
         assert result.record.phase is Phase.UNRESOLVED
         assert "deadline exhausted after 1 lookup(s)" in result.record.reason
     assert len(ledger.refunds()) == 1
+
+
+async def test_deadline_includes_waits_and_holds_the_active_boundary(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    entered = asyncio.Event()
+    seen = []
+
+    class CountedLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            seen.append(record.key)
+            entered.set()
+            return await super().observe(record)
+
+    tool = CountedLookup(ledger, Scenario.UNOBSERVABLE)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        task = asyncio.create_task(
+            runtime.recover(
+                operation.key,
+                tool=tool,
+                budget=RecoveryBudget(timeout_seconds=0.1, interval_seconds=60),
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            assert isinstance(await runtime.reconcile(operation.key, tool=tool), Unresolved)
+            assert isinstance(
+                await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget()),
+                Unresolved,
+            )
+            with pytest.raises(RuntimeUsageError, match="active operations"):
+                runtime.close()
+            result = await asyncio.wait_for(task, timeout=5)
+        finally:
+            if not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        assert isinstance(result, Unresolved)
+        assert len(seen) == 1
+        assert "deadline" in result.record.reason
