@@ -157,3 +157,26 @@ async def test_deadline_includes_waits_and_holds_the_active_boundary(
         assert isinstance(result, Unresolved)
         assert len(seen) == 1
         assert "deadline" in result.record.reason
+
+
+@pytest.mark.parametrize("error_type", [TimeoutError, ConnectionError])
+async def test_adapter_errors_are_not_budget_exhaustion(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger, error_type: type[Exception]
+) -> None:
+    class BrokenLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise error_type("Provider lookup failed")
+
+    tool = BrokenLookup(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        with pytest.raises(error_type, match="Provider lookup failed"):
+            await runtime.recover(
+                operation.key, tool=tool, budget=RecoveryBudget(timeout_seconds=5)
+            )
+        assert runtime.inspect(operation.key).phase is Phase.RECONCILING
+        assert runtime.events(operation.key)[-1].kind == "reconciliation_started"
+        assert isinstance(
+            await runtime.recover(operation.key, tool=RefundTool(ledger), budget=RecoveryBudget()),
+            ConfirmedApplied,
+        )
