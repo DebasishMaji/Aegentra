@@ -180,3 +180,33 @@ async def test_adapter_errors_are_not_budget_exhaustion(
             await runtime.recover(operation.key, tool=RefundTool(ledger), budget=RecoveryBudget()),
             ConfirmedApplied,
         )
+
+
+async def test_external_cancellation_is_not_budget_exhaustion(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    entered = asyncio.Event()
+    never = asyncio.Event()
+
+    class WaitingLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            entered.set()
+            await never.wait()
+            raise AssertionError("The caller should cancel this lookup.")
+
+    tool = WaitingLookup(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        task = asyncio.create_task(
+            runtime.recover(operation.key, tool=tool, budget=RecoveryBudget(timeout_seconds=60))
+        )
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+        assert runtime.events(operation.key)[-1].kind == "reconciliation_started"
+        assert isinstance(
+            await runtime.recover(operation.key, tool=RefundTool(ledger), budget=RecoveryBudget()),
+            ConfirmedApplied,
+        )
