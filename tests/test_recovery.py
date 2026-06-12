@@ -210,3 +210,29 @@ async def test_external_cancellation_is_not_budget_exhaustion(
             await runtime.recover(operation.key, tool=RefundTool(ledger), budget=RecoveryBudget()),
             ConfirmedApplied,
         )
+
+
+async def test_cancellation_suppressing_adapter_is_not_probed_again(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    seen = []
+
+    class CancellationSuppressingLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            seen.append(record.key)
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return Observation.unknown(record, reason="No answer after interrupted lookup.")
+            raise AssertionError("Expected a deadline.")
+
+    tool = CancellationSuppressingLookup(ledger, Scenario.UNOBSERVABLE)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        result = await asyncio.wait_for(
+            runtime.recover(operation.key, tool=tool, budget=RecoveryBudget(timeout_seconds=0.02)),
+            timeout=5,
+        )
+        assert isinstance(result, Unresolved)
+        assert len(seen) == 1
+        assert "deadline" in result.record.reason
