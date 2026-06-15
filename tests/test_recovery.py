@@ -236,3 +236,27 @@ async def test_cancellation_suppressing_adapter_is_not_probed_again(
         assert isinstance(result, Unresolved)
         assert len(seen) == 1
         assert "deadline" in result.record.reason
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_observations": True},
+        {"max_observations": 0},
+        {"max_observations": -1},
+        {"max_observations": 1.5},
+        {"timeout_seconds": 0},
+        {"timeout_seconds": -1},
+        {"timeout_seconds": True},
+        {"timeout_seconds": float("nan")},
+        {"timeout_seconds": float("inf")},
+        {"interval_seconds": -1},
+        {"interval_seconds": True},
+        {"interval_seconds": float("nan")},
+        {"interval_seconds": float("inf")},
+        {"interval_seconds": "1"},
+    ],
+)
+def test_invalid_budget_values_fail_before_use(kwargs: dict) -> None:
+    with pytest.raises(ValueError):
+        RecoveryBudget(**kwargs)
