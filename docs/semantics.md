@@ -62,7 +62,7 @@ constructing an operation. Do not let the planner allocate approvals or scopes.
 |---|---|
 | `RESERVED` | Committed a dispatch reservation; execution may or may not have begun. |
 | `RECONCILING` | Started a read-only observation. |
-| `UNRESOLVED` | Recorded an inconclusive observation. |
+| `UNRESOLVED` | Recorded an inconclusive observation or exhausted a recovery budget. |
 | `SETTLED` | Recorded applied or final non-applied evidence. |
 
 An abrupt exit or unexpected adapter exception may leave `RESERVED` or
@@ -146,6 +146,13 @@ does not cancel a remote request.
 
 The runtime is confined to one process, thread, and event loop. It refuses to
 close while adapter calls are active. Cancel and await tasks before shutdown.
+
+`recover` keeps an operation active across its bounded read-only polling sequence,
+including waits. Exhaustion preserves `UNKNOWN` and appends `recovery_exhausted`;
+it never permits another dispatch. See [recovery budgets](recovery.md).
+
+Operators can use a separate [read-only inspection snapshot](inspection.md) without
+taking ownership. That connection cannot dispatch, migrate, or settle operations.
 
 ## Storage assumptions
 
