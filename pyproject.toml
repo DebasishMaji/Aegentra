@@ -18,6 +18,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+aegentra = "aegentra.cli:main"
+
 [project.urls]
 Repository = "https://github.com/DebasishMaji/Aegentra"
 Issues = "https://github.com/DebasishMaji/Aegentra/issues"
