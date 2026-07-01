@@ -49,3 +49,25 @@ def test_list_defaults_to_unresolved_and_runs_beside_a_writer(journal: Path) -> 
     assert "arguments" not in report["operations"][0]
     assert "receipt" not in report["operations"][0]
     assert report["next_cursor"] is None
+
+
+def test_list_cursor_round_trips_and_can_include_settled_operations(journal: Path) -> None:
+    first = run_cli("list", str(journal), "--knowledge", "all", "--limit", "1")
+    assert first.returncode == 0, first.stderr
+    cursor = json.loads(first.stdout)["next_cursor"]
+    second = run_cli(
+        "list",
+        str(journal),
+        "--knowledge",
+        "all",
+        "--limit",
+        "1",
+        "--after",
+        cursor["tenant"],
+        cursor["account"],
+        cursor["operation_id"],
+    )
+    assert second.returncode == 0, second.stderr
+    page = json.loads(second.stdout)
+    assert page["operations"][0]["key"]["operation_id"] == "refund-43"
+    assert page["next_cursor"] is None
