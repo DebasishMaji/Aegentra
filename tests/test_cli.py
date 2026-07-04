@@ -71,3 +71,13 @@ def test_list_cursor_round_trips_and_can_include_settled_operations(journal: Pat
     page = json.loads(second.stdout)
     assert page["operations"][0]["key"]["operation_id"] == "refund-43"
     assert page["next_cursor"] is None
+
+
+def test_inspect_payload_is_explicit(journal: Path) -> None:
+    result = run_cli("inspect", str(journal), *KEY_ARGS)
+    assert result.returncode == 0, result.stderr
+    assert "arguments" not in json.loads(result.stdout)["operation"]
+    result = run_cli("inspect", str(journal), *KEY_ARGS, "--include-payload")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["operation"]["arguments"]["amount_minor"] == 5000
+    assert json.loads(result.stdout)["operation"]["receipt"] is None
