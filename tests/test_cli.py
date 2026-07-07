@@ -81,3 +81,21 @@ def test_inspect_payload_is_explicit(journal: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["operation"]["arguments"]["amount_minor"] == 5000
     assert json.loads(result.stdout)["operation"]["receipt"] is None
+
+
+def test_trace_contains_blocked_proposals_and_an_explicit_continuation(journal: Path) -> None:
+    first = run_cli("trace", str(journal), *KEY_ARGS, "--limit", "2")
+    assert first.returncode == 0, first.stderr
+    page = json.loads(first.stdout)
+    assert len(page["events"]) == 2
+    second = run_cli(
+        "trace",
+        str(journal),
+        *KEY_ARGS,
+        "--after-sequence",
+        str(page["next_sequence"]),
+    )
+    assert second.returncode == 0, second.stderr
+    page = json.loads(second.stdout)
+    assert page["events"][0]["blocked_action"]["requested_key"]["operation_id"] == "replanned"
+    assert page["next_sequence"] is None
