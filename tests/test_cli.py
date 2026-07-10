@@ -99,3 +99,13 @@ def test_trace_contains_blocked_proposals_and_an_explicit_continuation(journal: 
     page = json.loads(second.stdout)
     assert page["events"][0]["blocked_action"]["requested_key"]["operation_id"] == "replanned"
     assert page["next_sequence"] is None
+
+
+def test_missing_journal_is_an_error_without_creating_it(tmp_path: Path) -> None:
+    path = tmp_path / "absent.sqlite3"
+    result = run_cli("list", str(path))
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "aegentra: error:" in result.stderr
+    assert not path.exists()
+    assert not Path(f"{path}.lock").exists()
