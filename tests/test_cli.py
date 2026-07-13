@@ -109,3 +109,19 @@ def test_missing_journal_is_an_error_without_creating_it(tmp_path: Path) -> None
     assert "aegentra: error:" in result.stderr
     assert not path.exists()
     assert not Path(f"{path}.lock").exists()
+
+
+def test_missing_namespaced_operation_is_an_error(journal: Path) -> None:
+    result = run_cli(
+        "inspect",
+        str(journal),
+        "--tenant",
+        "other",
+        "--account",
+        "payments",
+        "--operation-id",
+        "refund-42",
+    )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "No operation" in result.stderr
