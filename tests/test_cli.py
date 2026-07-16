@@ -125,3 +125,21 @@ def test_missing_namespaced_operation_is_an_error(journal: Path) -> None:
     assert result.returncode == 1
     assert result.stdout == ""
     assert "No operation" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["list", "--limit", "0"],
+        ["list", "--limit", "1001"],
+        ["list", "--limit", "true"],
+        ["list", "--tenant", ""],
+        ["trace", *KEY_ARGS, "--after-sequence", "-1"],
+        ["recover"],
+    ],
+)
+def test_argument_errors_are_not_successes(journal: Path, arguments: list[str]) -> None:
+    result = run_cli(arguments[0], str(journal), *arguments[1:])
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "error:" in result.stderr
