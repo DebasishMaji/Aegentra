@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from dataclasses import replace
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -143,3 +144,12 @@ def test_argument_errors_are_not_successes(journal: Path, arguments: list[str]) 
     assert result.returncode == 2
     assert result.stdout == ""
     assert "error:" in result.stderr
+
+
+def test_module_and_installed_entrypoint_agree_on_version() -> None:
+    module = run_cli("--version")
+    installed = subprocess.run(
+        ["aegentra", "--version"], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert module.returncode == installed.returncode == 0
+    assert module.stdout == installed.stdout == f"aegentra {version('aegentra')}\n"
