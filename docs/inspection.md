@@ -29,3 +29,27 @@ adapter reasons can still be sensitive; this is not an automatic redaction tool.
 
 Both schema 1 and schema 2 can be inspected. Legacy events have no blocked-action
 metadata. Reading an older journal does not perform a migration.
+
+## Operator commands
+
+The installed `aegentra` command (also `python -m aegentra`) emits JSON:
+
+```sh
+aegentra list agent.sqlite3 --tenant tenant-a --limit 20
+aegentra inspect agent.sqlite3 --tenant tenant-a --account payments --operation-id refund-42
+aegentra trace agent.sqlite3 --tenant tenant-a --account payments --operation-id refund-42
+```
+
+For list pages, pass the three fields of `next_cursor` as
+`--after TENANT ACCOUNT ID`, keeping the original filters. Use
+`--knowledge all` to include settled operations. For trace pages, use
+`--after-sequence N` with `next_sequence`. Limits are 1 to 1,000.
+
+Every invocation opens a fresh snapshot. Pages fetched in separate invocations
+can therefore reflect intervening commits; use the Python API for a single
+snapshot spanning several pages. Keyset pagination is not a change feed.
+
+Arguments and receipts require `--include-payload`. Protect exported metadata too.
+Commands never write to the journal, load provider adapters, or manually declare
+an effect settled. Success exits 0, operational errors exit 1 with a message on
+stderr, and argument errors exit 2. JSON data is written only to stdout.
