@@ -137,10 +137,12 @@ def test_missing_namespaced_operation_is_an_error(journal: Path) -> None:
         ["list", "--tenant", ""],
         ["trace", *KEY_ARGS, "--after-sequence", "-1"],
         ["recover"],
+        ["lab", "--max-observations", "0"],
     ],
 )
 def test_argument_errors_are_not_successes(journal: Path, arguments: list[str]) -> None:
-    result = run_cli(arguments[0], str(journal), *arguments[1:])
+    positional = [] if arguments[0] == "lab" else [str(journal)]
+    result = run_cli(arguments[0], *positional, *arguments[1:])
     assert result.returncode == 2
     assert result.stdout == ""
     assert "error:" in result.stderr

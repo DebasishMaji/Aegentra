@@ -167,6 +167,15 @@ class RefundLedger:
             for row in rows
         )
 
+    def pending_count(self) -> int:
+        """Evaluator-only count of requests still capable of a late effect."""
+        with closing(self._connect()) as db:
+            return int(
+                db.execute(
+                    "SELECT COUNT(*) FROM refund_requests WHERE state = 'pending'"
+                ).fetchone()[0]
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class RefundTool:

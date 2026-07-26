@@ -1,8 +1,9 @@
-"""Read-only operator commands. No adapter loading, dispatch, or manual settlement."""
+"""Read-only operator commands and a disposable, explicitly scripted laboratory."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sqlite3
 import sys
@@ -12,6 +13,7 @@ from importlib.metadata import version
 from ._serialization import key_dict, record_dict
 from .errors import AegentraError
 from .inspection import Inspection
+from .lab import run_lab
 from .models import JSONValue, Knowledge, OperationKey
 
 
@@ -38,12 +40,23 @@ def _limit(value: str) -> int:
     return result
 
 
+def _positive(value: str) -> int:
+    result = _sequence(value)
+    if result < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="aegentra", description="Inspect effect obligations without taking journal ownership."
+        prog="aegentra", description="Inspect effect obligations or run the scripted failure lab."
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {version('aegentra')}")
     commands = parser.add_subparsers(dest="command", required=True)
+    lab = commands.add_parser(
+        "lab", help="run deterministic refund counterexamples in temporary files"
+    )
+    lab.add_argument("--max-observations", type=_positive, default=2)
     listing = commands.add_parser("list", help="list unresolved operations by default")
     listing.add_argument("journal")
     listing.add_argument("--tenant", type=_nonempty)
@@ -108,8 +121,11 @@ def _query(reader: Inspection, arguments: argparse.Namespace) -> dict[str, JSONV
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
-        with Inspection(arguments.journal) as reader:
-            report = _query(reader, arguments)
+        if arguments.command == "lab":
+            report = asyncio.run(run_lab(max_observations=arguments.max_observations)).as_dict()
+        else:
+            with Inspection(arguments.journal) as reader:
+                report = _query(reader, arguments)
         print(json.dumps(report, indent=2, sort_keys=True))
     except (AegentraError, sqlite3.Error, OSError) as exc:
         print(f"aegentra: error: {exc}", file=sys.stderr)
