@@ -155,3 +155,15 @@ def test_module_and_installed_entrypoint_agree_on_version() -> None:
     )
     assert module.returncode == installed.returncode == 0
     assert module.stdout == installed.stdout == f"aegentra {version('aegentra')}\n"
+
+
+def test_laboratory_command_emits_a_complete_comparison() -> None:
+    result = run_cli("lab", "--max-observations", "1")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    report = json.loads(result.stdout)
+    assert report["format_version"] == 1
+    assert report["kind"] == "scripted_failure_laboratory"
+    assert report["max_observations"] == 1
+    assert len(report["results"]) == 15
+    assert report["totals_by_policy"]["effect_boundary"]["false_terminal_claims"] == 0
