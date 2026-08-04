@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from aegentra import Knowledge
 from aegentra.lab import LabCaseResult, LabPolicy, LabReport, run_lab
 from aegentra.sandbox import Scenario
 
@@ -23,3 +24,22 @@ def test_all_frozen_cases_and_policies_are_present(report: LabReport) -> None:
     assert report.horizon_step == 4
     assert all(row.trace[-1].step == report.horizon_step for row in report.results)
     assert all(row.invalid_effects == 0 for row in report.results)
+
+
+@pytest.mark.parametrize("policy", list(LabPolicy))
+def test_acknowledgment_and_final_rejection_are_not_conflated(
+    report: LabReport, policy: LabPolicy
+) -> None:
+    applied = case(report, Scenario.ACKNOWLEDGED, policy)
+    assert applied.outcome is Knowledge.APPLIED
+    assert applied.write_calls == 1
+    assert applied.observation_calls == applied.replan_proposals == 0
+    assert applied.actual_effects == 1
+    assert applied.correct_resolution and applied.valid_completion
+    assert applied.false_terminal_claims == 0
+
+    rejected = case(report, Scenario.REJECTED, policy)
+    assert rejected.outcome is Knowledge.NOT_APPLIED_FINAL
+    assert rejected.actual_effects == rejected.observation_calls == 0
+    assert rejected.correct_resolution and not rejected.valid_completion
+    assert rejected.false_terminal_claims == 0
