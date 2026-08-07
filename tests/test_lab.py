@@ -43,3 +43,17 @@ def test_acknowledgment_and_final_rejection_are_not_conflated(
     assert rejected.actual_effects == rejected.observation_calls == 0
     assert rejected.correct_resolution and not rejected.valid_completion
     assert rejected.false_terminal_claims == 0
+
+
+@pytest.mark.parametrize(
+    "scenario", [Scenario.LOST_ACKNOWLEDGMENT, Scenario.DELAYED_COMMIT, Scenario.UNOBSERVABLE]
+)
+def test_fresh_retry_exposes_duplicates_even_after_client_success(
+    report: LabReport, scenario: Scenario
+) -> None:
+    row = case(report, scenario, LabPolicy.FRESH_RETRY)
+    assert row.write_calls == row.actual_effects == 2
+    assert row.replan_proposals == row.duplicate_effects == row.false_terminal_claims == 1
+    assert row.observation_calls == row.prevented_writes == 0
+    assert row.outcome is Knowledge.APPLIED
+    assert not row.valid_completion
