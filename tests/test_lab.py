@@ -57,3 +57,25 @@ def test_fresh_retry_exposes_duplicates_even_after_client_success(
     assert row.observation_calls == row.prevented_writes == 0
     assert row.outcome is Knowledge.APPLIED
     assert not row.valid_completion
+
+
+@pytest.mark.parametrize("policy", [LabPolicy.OBSERVE_OR_STOP, LabPolicy.EFFECT_BOUNDARY])
+@pytest.mark.parametrize(
+    ("scenario", "observations", "outcome"),
+    [
+        (Scenario.LOST_ACKNOWLEDGMENT, 1, Knowledge.APPLIED),
+        (Scenario.DELAYED_COMMIT, 2, Knowledge.APPLIED),
+        (Scenario.UNOBSERVABLE, 2, Knowledge.UNKNOWN),
+    ],
+)
+def test_careful_policies_share_information_budgets_and_results(
+    report: LabReport, policy: LabPolicy, scenario: Scenario, observations: int, outcome: Knowledge
+) -> None:
+    row = case(report, scenario, policy)
+    assert row.write_calls == row.actual_effects == 1
+    assert row.observation_calls == observations
+    assert row.replan_proposals == row.prevented_writes == 1
+    assert row.boundary_blocks == int(policy is LabPolicy.EFFECT_BOUNDARY)
+    assert row.duplicate_effects == row.false_terminal_claims == 0
+    assert row.outcome is outcome
+    assert row.valid_completion is (outcome is Knowledge.APPLIED)
