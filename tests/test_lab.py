@@ -79,3 +79,17 @@ def test_careful_policies_share_information_budgets_and_results(
     assert row.duplicate_effects == row.false_terminal_claims == 0
     assert row.outcome is outcome
     assert row.valid_completion is (outcome is Knowledge.APPLIED)
+
+
+async def test_one_lookup_does_not_stop_the_provider_from_committing_later() -> None:
+    report = await run_lab(max_observations=1)
+    for policy in (LabPolicy.OBSERVE_OR_STOP, LabPolicy.EFFECT_BOUNDARY):
+        row = case(report, Scenario.DELAYED_COMMIT, policy)
+        terminal = next(step for step in row.trace if step.action == "terminal_claim")
+        commit = next(step for step in row.trace if step.action == "provider_commit")
+        assert terminal.step == 2 < commit.step == 3
+        assert row.outcome is Knowledge.UNKNOWN
+        assert row.actual_effects == 1
+        assert row.pending_at_horizon == row.false_terminal_claims == 0
+        assert not row.correct_resolution and not row.valid_completion
+    assert all(row.observation_calls <= 1 for row in report.results)
