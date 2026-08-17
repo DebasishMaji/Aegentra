@@ -93,3 +93,11 @@ async def test_one_lookup_does_not_stop_the_provider_from_committing_later() -> 
         assert row.pending_at_horizon == row.false_terminal_claims == 0
         assert not row.correct_resolution and not row.valid_completion
     assert all(row.observation_calls <= 1 for row in report.results)
+
+
+def test_delayed_duplicate_is_counted_after_unsafe_policy_stops(report: LabReport) -> None:
+    row = case(report, Scenario.DELAYED_COMMIT, LabPolicy.FRESH_RETRY)
+    terminal = next(step for step in row.trace if step.action == "terminal_claim")
+    commit = next(step for step in row.trace if step.action == "provider_commit")
+    assert terminal.step == 1 < commit.step == 3
+    assert row.actual_effects == 2
