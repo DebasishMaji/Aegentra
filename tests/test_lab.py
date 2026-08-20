@@ -101,3 +101,19 @@ def test_delayed_duplicate_is_counted_after_unsafe_policy_stops(report: LabRepor
     commit = next(step for step in row.trace if step.action == "provider_commit")
     assert terminal.step == 1 < commit.step == 3
     assert row.actual_effects == 2
+
+
+def test_totals_use_all_assigned_cases_and_keep_rejections_separate(report: LabReport) -> None:
+    totals = report.as_dict()["totals_by_policy"]
+    for policy in (LabPolicy.OBSERVE_OR_STOP, LabPolicy.EFFECT_BOUNDARY):
+        row = totals[policy.value]
+        assert row["tasks"] == 5
+        assert row["write_calls"] == row["observation_calls"] == 5
+        assert row["valid_completions"] == 3
+        assert row["correct_resolutions"] == 4
+        assert row["unresolved_outcomes"] == 1
+        assert row["duplicate_effects"] == row["false_terminal_claims"] == 0
+    unsafe = totals["fresh_retry"]
+    assert unsafe["duplicate_effects"] == unsafe["false_terminal_claims"] == 3
+    assert unsafe["valid_completions"] == 1
+    assert unsafe["correct_resolutions"] == 2
