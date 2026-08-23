@@ -117,3 +117,7 @@ def test_totals_use_all_assigned_cases_and_keep_rejections_separate(report: LabR
     assert unsafe["duplicate_effects"] == unsafe["false_terminal_claims"] == 3
     assert unsafe["valid_completions"] == 1
     assert unsafe["correct_resolutions"] == 2
+
+
+async def test_reports_are_deterministic_without_receipt_ids(report: LabReport) -> None:
+    assert (await run_lab()).as_dict() == report.as_dict()
