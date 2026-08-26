@@ -1,10 +1,11 @@
 import asyncio
+from dataclasses import replace
 
 import pytest
 
 from aegentra import Knowledge
 from aegentra.lab import LabCaseResult, LabPolicy, LabReport, run_lab
-from aegentra.sandbox import Scenario
+from aegentra.sandbox import Refund, RefundLedger, Scenario
 
 
 @pytest.fixture(scope="module")
@@ -121,3 +122,20 @@ def test_totals_use_all_assigned_cases_and_keep_rejections_separate(report: LabR
 
 async def test_reports_are_deterministic_without_receipt_ids(report: LabReport) -> None:
     assert (await run_lab()).as_dict() == report.as_dict()
+
+
+async def test_evaluator_checks_intent_not_just_effect_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = RefundLedger.refunds
+
+    def wrong_amount(ledger: RefundLedger) -> tuple[Refund, ...]:
+        return tuple(replace(refund, amount_minor=1) for refund in original(ledger))
+
+    monkeypatch.setattr(RefundLedger, "refunds", wrong_amount)
+    report = await run_lab()
+    for policy in LabPolicy:
+        row = case(report, Scenario.ACKNOWLEDGED, policy)
+        assert row.actual_effects == row.invalid_effects == 1
+        assert row.false_terminal_claims == 1
+        assert not row.valid_completion
