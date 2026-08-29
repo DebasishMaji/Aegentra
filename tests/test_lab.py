@@ -1,11 +1,12 @@
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from aegentra import Knowledge
+from aegentra import Knowledge, Operation, Runtime
 from aegentra.lab import LabCaseResult, LabPolicy, LabReport, run_lab
-from aegentra.sandbox import Refund, RefundLedger, Scenario
+from aegentra.sandbox import Refund, RefundLedger, RefundTool, Scenario
 
 
 @pytest.fixture(scope="module")
@@ -139,3 +140,15 @@ async def test_evaluator_checks_intent_not_just_effect_count(
         assert row.actual_effects == row.invalid_effects == 1
         assert row.false_terminal_claims == 1
         assert not row.valid_completion
+
+
+async def test_pending_ground_truth_is_separate_from_effects(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.DELAYED_COMMIT))
+        assert ledger.pending_count() == 1
+        assert len(ledger.refunds()) == 0
+        ledger.commit_pending(operation.key)
+        assert ledger.pending_count() == 0
+        assert len(ledger.refunds()) == 1
