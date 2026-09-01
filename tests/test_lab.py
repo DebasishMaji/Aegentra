@@ -152,3 +152,9 @@ async def test_pending_ground_truth_is_separate_from_effects(
         ledger.commit_pending(operation.key)
         assert ledger.pending_count() == 0
         assert len(ledger.refunds()) == 1
+
+
+@pytest.mark.parametrize("allowance", [0, -1, True, 1.5])
+async def test_invalid_allowances_fail_before_running(allowance: int) -> None:
+    with pytest.raises(ValueError):
+        await run_lab(max_observations=allowance)
