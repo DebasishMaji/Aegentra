@@ -16,9 +16,10 @@ and a SQLite journal are not, by themselves, a new research result.
 
 ## Current artifact
 
-The repository contains a conservative reference runtime and a persistent
-scenario provider. It has no LLM integration, comparative benchmark results,
-learned recovery policy, or production provider adapter.
+The repository contains a conservative reference runtime, a persistent scenario
+provider, and a [scripted comparison laboratory](laboratory.md). It has no LLM
+integration, learned recovery policy, or production provider adapter. Laboratory
+counts are reproducible counterexamples, not comparative model-benchmark results.
 
 The provider can acknowledge, lose the acknowledgment, commit after a timeout,
 reject before execution, or offer no usable outcome lookup. Its evaluator view
@@ -31,6 +32,14 @@ to substantiate a broad reliability claim.
 Blocked replanning proposals are retained in the original operation's event
 history. Count these separately from provider attempts and actual effects: a
 rejected proposal is not a duplicate execution.
+
+The laboratory includes an explicitly unsafe fresh retry, a competent
+observe-or-stop baseline, and the scope-enforced runtime. They receive the same
+identity and lookup allowance. The competent baseline and boundary should agree
+on these single-process cases; that agreement is useful, not a result to hide.
+The frozen logical schedule lets a pending effect complete after a policy stops.
+Completion, correct rejection, unresolved outcomes, and false claims are reported
+separately. This is a starting artifact, not the evaluation plan below completed.
 
 ## Evaluation plan
 
