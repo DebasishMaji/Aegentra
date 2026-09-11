@@ -131,15 +131,17 @@ class Runtime:
     ) -> ConfirmedApplied | ConfirmedNotApplied | Unresolved:
         """Gather evidence within a cooperative deadline and a lookup allowance."""
         self._check_loop()
+        if not isinstance(budget, RecoveryBudget):
+            raise TypeError("budget must be a RecoveryBudget.")
         record = self._journal.get(key)
         self._journal.check_adapter(record, tool.name, tool.contract_version)
         if record.knowledge is not Knowledge.UNKNOWN or key in self._active:
             return _outcome(record)
 
-        self._active.add(key)
         observations = 0
         exhausted = "observation allowance"
         timeout = asyncio.timeout(budget.timeout_seconds)
+        self._active.add(key)
         try:
             try:
                 async with timeout:
