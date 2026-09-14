@@ -20,6 +20,7 @@ from .models import (
     OperationKey,
     OperationPage,
     OperationRecord,
+    _nonempty,
 )
 
 
@@ -98,8 +99,7 @@ class Inspection:
             parameters.append(knowledge.value)
         for column, value in (("tenant", tenant), ("account", account)):
             if value is not None:
-                if not value.strip():
-                    raise ValueError(f"{column} must not be empty.")
+                _nonempty(value, column)
                 conditions.append(f"{column} = ?")
                 parameters.append(value)
         if after is not None:
