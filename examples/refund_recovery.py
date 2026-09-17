@@ -1,5 +1,6 @@
 """Run with: uv run python examples/refund_recovery.py"""
 
+import argparse
 import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -53,6 +54,21 @@ async def demonstrate(directory: Path) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--directory",
+        type=Path,
+        help="retain journals in a new directory; existing paths are rejected",
+    )
+    arguments = parser.parse_args()
+    if arguments.directory is not None:
+        try:
+            arguments.directory.mkdir(mode=0o700)
+        except OSError as exc:
+            parser.error(f"Cannot create demo directory: {exc}")
+        asyncio.run(demonstrate(arguments.directory))
+        print(f"Journals retained in {arguments.directory}")
+        return
     with TemporaryDirectory(prefix="aegentra-") as directory:
         asyncio.run(demonstrate(Path(directory)))
 
