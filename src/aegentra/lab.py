@@ -337,22 +337,22 @@ async def _run_case(
     excluded = knowledge is Knowledge.NOT_APPLIED_FINAL and effects == 0 and pending == 0
     false_claims = int(knowledge is not Knowledge.UNKNOWN and not (completed or excluded))
     return LabCaseResult(
-        scenario,
-        policy,
-        clock.write_calls,
-        clock.observation_calls,
-        proposals,
-        prevented,
-        boundary_blocks,
-        effects,
-        effects - matching,
-        max(0, effects - 1),
-        pending,
-        knowledge,
-        false_claims,
-        completed,
-        completed or excluded,
-        tuple(clock.trace),
+        scenario=scenario,
+        policy=policy,
+        write_calls=clock.write_calls,
+        observation_calls=clock.observation_calls,
+        replan_proposals=proposals,
+        prevented_writes=prevented,
+        boundary_blocks=boundary_blocks,
+        actual_effects=effects,
+        invalid_effects=effects - matching,
+        duplicate_effects=max(0, effects - 1),
+        pending_at_horizon=pending,
+        outcome=knowledge,
+        false_terminal_claims=false_claims,
+        valid_completion=completed,
+        correct_resolution=completed or excluded,
+        trace=tuple(clock.trace),
     )
 
 

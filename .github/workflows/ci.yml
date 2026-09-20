@@ -26,3 +26,15 @@ jobs:
       - run: uv run pytest
       - run: uv run python examples/refund_recovery.py
       - run: uv build
+      - name: Exercise the installed wheel outside the checkout
+        run: |
+          uv venv --python "${{ matrix.python }}" "$RUNNER_TEMP/aegentra-wheel"
+          uv pip install --python "$RUNNER_TEMP/aegentra-wheel/bin/python" --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" --version
+          "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" lab > "$RUNNER_TEMP/aegentra-lab-report.json"
+          "$RUNNER_TEMP/aegentra-wheel/bin/python" \
+            "$GITHUB_WORKSPACE/examples/refund_recovery.py" --directory "$RUNNER_TEMP/aegentra-demo"
+          "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" trace "$RUNNER_TEMP/aegentra-demo/agent.sqlite3" \
+            --tenant shop --account payments --operation-id approved-refund-42 \
+            > "$RUNNER_TEMP/aegentra-demo-trace.json"
