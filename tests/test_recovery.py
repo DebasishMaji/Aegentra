@@ -161,6 +161,24 @@ async def test_polling_wait_holds_the_active_boundary(
         assert len(seen) == 1
 
 
+async def test_deadline_includes_polling_waits(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    tool = RefundTool(ledger, Scenario.UNOBSERVABLE)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        result = await asyncio.wait_for(
+            runtime.recover(
+                operation.key,
+                tool=tool,
+                budget=RecoveryBudget(timeout_seconds=0.02, interval_seconds=60),
+            ),
+            timeout=5,
+        )
+        assert isinstance(result, Unresolved)
+        assert "deadline exhausted after 1 lookup(s)" in result.record.reason
+
+
 @pytest.mark.parametrize("error_type", [TimeoutError, ConnectionError])
 async def test_adapter_errors_are_not_budget_exhaustion(
     tmp_path: Path, operation: Operation, ledger: RefundLedger, error_type: type[Exception]
