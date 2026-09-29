@@ -258,6 +258,28 @@ async def test_cancellation_suppressing_adapter_is_not_probed_again(
         assert "deadline" in result.record.reason
 
 
+async def test_definitive_evidence_returned_during_cancellation_is_retained(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    class LateAnswer(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return await super().observe(record)
+            raise AssertionError("Expected the deadline to interrupt the wait.")
+
+    tool = LateAnswer(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        result = await asyncio.wait_for(
+            runtime.recover(operation.key, tool=tool, budget=RecoveryBudget(timeout_seconds=0.02)),
+            timeout=5,
+        )
+        assert isinstance(result, ConfirmedApplied)
+        assert runtime.events(operation.key)[-1].kind == "observed_applied"
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
