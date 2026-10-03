@@ -280,6 +280,20 @@ async def test_definitive_evidence_returned_during_cancellation_is_retained(
         assert runtime.events(operation.key)[-1].kind == "observed_applied"
 
 
+async def test_invalid_budget_does_not_leave_an_active_operation(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    tool = RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=tool)
+        with pytest.raises(TypeError, match="RecoveryBudget"):
+            await runtime.recover(operation.key, tool=tool, budget=None)
+        assert isinstance(
+            await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget()),
+            ConfirmedApplied,
+        )
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
