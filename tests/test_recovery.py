@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
@@ -292,6 +293,34 @@ async def test_invalid_budget_does_not_leave_an_active_operation(
             await runtime.recover(operation.key, tool=tool, budget=RecoveryBudget()),
             ConfirmedApplied,
         )
+
+
+async def test_exhaustion_event_failure_rolls_back_and_propagates(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "agent.sqlite3"
+    tool = RefundTool(ledger, Scenario.UNOBSERVABLE)
+    with Runtime(path) as runtime:
+        await runtime.perform(operation, tool=tool)
+        with sqlite3.connect(path) as db:
+            db.execute(
+                """CREATE TRIGGER fail_exhaustion BEFORE INSERT ON events
+                   WHEN NEW.kind = 'recovery_exhausted'
+                   BEGIN SELECT RAISE(FAIL, 'injected recovery log failure'); END"""
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="injected recovery"):
+            await runtime.recover(
+                operation.key, tool=tool, budget=RecoveryBudget(max_observations=1)
+            )
+        assert runtime.events(operation.key)[-1].kind == "observed_unknown"
+        assert runtime.inspect(operation.key).reason == "Provider offers no usable outcome lookup."
+        assert isinstance(
+            await runtime.perform(
+                replace(operation, operation_id="fresh"), tool=RefundTool(ledger)
+            ),
+            BlockedByUnresolvedEffect,
+        )
+    assert len(ledger.refunds()) == 1
 
 
 @pytest.mark.parametrize(
