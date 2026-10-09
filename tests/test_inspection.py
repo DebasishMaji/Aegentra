@@ -131,6 +131,19 @@ async def test_trace_is_paginated_and_payloads_require_opt_in(
         assert full["operation"]["arguments"] == operation.arguments
 
 
+async def test_applied_receipts_require_payload_opt_in(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "journal ?# snapshot.sqlite3"
+    with Runtime(path) as runtime:
+        outcome = await runtime.perform(operation, tool=RefundTool(ledger))
+    with Inspection(path) as reader:
+        default = reader.export_trace(operation.key)
+        assert "receipt" not in default["operation"]
+        explicit = reader.export_trace(operation.key, include_payload=True)
+        assert explicit["operation"]["receipt"] == outcome.receipt
+
+
 @pytest.mark.parametrize("limit", [0, -1, 1001, True, 1.5])
 def test_page_limits_are_bounded(tmp_path: Path, limit: int) -> None:
     path = tmp_path / "agent.sqlite3"
