@@ -167,3 +167,31 @@ def test_laboratory_command_emits_a_complete_comparison() -> None:
     assert report["max_observations"] == 1
     assert len(report["results"]) == 15
     assert report["totals_by_policy"]["effect_boundary"]["false_terminal_claims"] == 0
+
+
+def test_retained_example_can_be_inspected_and_refuses_to_overwrite(tmp_path: Path) -> None:
+    directory = tmp_path / "refund-demo"
+    script = Path(__file__).resolve().parents[1] / "examples" / "refund_recovery.py"
+    command = [sys.executable, str(script), "--directory", str(directory)]
+    example = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert example.returncode == 0, example.stderr
+    assert "Actual refunds: 1" in example.stdout
+    result = run_cli(
+        "trace",
+        str(directory / "agent.sqlite3"),
+        "--tenant",
+        "shop",
+        "--account",
+        "payments",
+        "--operation-id",
+        "approved-refund-42",
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["operation"]["knowledge"] == "applied"
+    assert any(event["kind"] == "effect_blocked" for event in report["events"])
+    before = (directory / "agent.sqlite3").read_bytes()
+    repeated = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+    assert repeated.returncode == 2
+    assert "Cannot create demo directory" in repeated.stderr
+    assert (directory / "agent.sqlite3").read_bytes() == before
