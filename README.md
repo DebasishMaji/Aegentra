@@ -9,6 +9,9 @@ the same declared effect scope, and reconciles through provider evidence.
 **Research alpha.** Python 3.11+, macOS and Linux. No runtime dependencies.
 This version permits one possible dispatch per operation. It does not retry writes.
 
+The package contains a focused execution library, a read-only operator CLI, and a
+scripted failure laboratory. It is not an agent framework or a workflow engine.
+
 ## The failure that matters
 
 ```text
@@ -42,6 +45,18 @@ call through another tool is blocked. After the runtime restarts, a read-only
 lookup confirms the original refund. There is still only one provider effect.
 
 No API key, model, or external service is required.
+
+To keep the journals and explore the result yourself:
+
+```sh
+uv run python examples/refund_recovery.py --directory ./refund-demo
+uv run aegentra list refund-demo/agent.sqlite3 --knowledge all
+uv run aegentra trace refund-demo/agent.sqlite3 \
+  --tenant shop --account payments --operation-id approved-refund-42
+```
+
+The directory must be new. The example refuses to overwrite an existing run.
+Without `--directory`, it removes its temporary files when it finishes.
 
 ## The API
 
@@ -84,6 +99,22 @@ Recovery requires the original tool name and contract version.
 `await runtime.reconcile(operation.key, tool=refund_tool)` performs an explicit
 read-only lookup.
 
+Inside an open runtime, pass an explicit budget for a bounded sequence of lookups:
+
+```python
+from aegentra import RecoveryBudget
+
+outcome = await runtime.recover(
+    operation.key,
+    tool=refund_tool,
+    budget=RecoveryBudget(max_observations=3, timeout_seconds=5.0, interval_seconds=0.25),
+)
+```
+
+Exhaustion returns `Unresolved` and records `recovery_exhausted`. It never clears
+the scope or permits a retry. The deadline is cooperative, not a way to forcibly
+stop blocking adapter code. See [recovery semantics](docs/recovery.md).
+
 Blocked proposals are recorded as `effect_blocked` events on the **blocking**
 operation. Their `blocked_action` field identifies the requested operation, tool,
 and contract version. The rejected payload and approval reference are not copied
@@ -98,6 +129,20 @@ for event in runtime.events(operation.key):
 
 These decisions survive restart and remain in the history after the original
 operation is reconciled.
+
+## Operator inspection
+
+`aegentra list`, `inspect`, and `trace` open read-only snapshots without taking
+the runtime's ownership lock. They can run beside a live writer and do not migrate
+older journals. Lists default to unresolved operations; JSON output includes
+explicit pagination cursors.
+
+Arguments and receipts are omitted unless `--include-payload` is supplied.
+Metadata and adapter reasons can still contain sensitive information. Protect
+exports as you would the original journal.
+
+Use `Inspection` for the same capability in Python, including a consistent
+snapshot across multiple pages. See [inspection and CLI details](docs/inspection.md).
 
 ## Writing an adapter
 
@@ -160,8 +205,27 @@ not claim to have invented them. The planned evaluation separates scope
 enforcement from recovery-policy quality, with existing durable runtimes and
 competent hand-written reconciliation as baselines.
 
-The current sandbox is not yet that benchmark. There are no published comparative
-results or established novelty claims. See [`docs/research.md`](docs/research.md).
+The included laboratory makes a small part of that question executable:
+
+```sh
+uv run aegentra lab > report.json
+uv run aegentra lab --max-observations 1 > one-lookup.json
+```
+
+Five fixed scenarios run against an unsafe fresh retry, a competent
+observe-or-stop policy, and Aegentra's effect boundary. Every policy gets the
+same business identity, lookup allowance, and evaluation horizon. Late effects
+continue after a client stops. Rejection, completion, uncertainty, and false
+claims are scored separately.
+
+The competent baseline matches the boundary on these single-process cases.
+The point is enforcement outside planner policy, not beating a deliberately
+uninformed baseline. This is a deterministic counterexample suite, not an LLM
+benchmark or evidence of universal reliability.
+
+See the [laboratory contract](docs/laboratory.md) and
+[research decision gates](docs/research.md). There are no published comparative
+model results or established novelty claims.
 
 ## Development
 
