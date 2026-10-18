@@ -16,6 +16,7 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
+uv run aegentra lab
 uv build
 ```
 
@@ -30,3 +31,13 @@ does not establish a provider guarantee.
 Use exact values in operation payloads. If normalization changes business meaning,
 reject the input instead. Keep credentials out of arguments, receipts, fixtures,
 and screenshots.
+
+Read-only inspection must stay read-only, including for legacy journals.
+Arguments and receipts must remain opt-in in exported traces. Exercise the
+installed wheel as well as the editable checkout when changing packaging or CLI
+entry points.
+
+The laboratory's `refund-replanning/1` schedule is a versioned experimental
+contract. Give every policy the same identity and budgets. Do not move a late
+effect outside the evaluation horizon, count a rejection as a completed refund,
+or remove the competent baseline because it matches the boundary.
