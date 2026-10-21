@@ -9,8 +9,9 @@ the same declared effect scope, and reconciles through provider evidence.
 **Research alpha.** Python 3.11+, macOS and Linux. No runtime dependencies.
 This version permits one possible dispatch per operation. It does not retry writes.
 
-The package contains a focused execution library, a read-only operator CLI, and a
-scripted failure laboratory. It is not an agent framework or a workflow engine.
+The package contains a focused execution library, a read-only operator CLI, a
+scripted failure laboratory, and a model-free adversarial testing agent. It is
+not a general-purpose agent framework or a workflow engine.
 
 ## The failure that matters
 
@@ -226,6 +227,11 @@ benchmark or evidence of universal reliability.
 See the [laboratory contract](docs/laboratory.md) and
 [research decision gates](docs/research.md). There are no published comparative
 model results or established novelty claims.
+
+The [adversarial testing agent](docs/adversarial-testing.md) explores mutations of
+benign fault sequences, checks actual provider effects independently, and shrinks
+counterexamples into replayable cases. Its bounded behavioral search is not a
+safety proof or an LLM benchmark.
 
 ## Development
 

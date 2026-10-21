@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ._testing import evaluate_refund, unmanaged_record
 from .models import (
     BlockedByUnresolvedEffect,
     EffectScope,
@@ -19,8 +19,6 @@ from .models import (
     Operation,
     OperationKey,
     OperationRecord,
-    Phase,
-    encode_arguments,
 )
 from .recovery import RecoveryBudget
 from .runtime import Runtime
@@ -221,26 +219,6 @@ class _InstrumentedTool:
         return observation
 
 
-def _unmanaged_record(operation: Operation, tool: _InstrumentedTool) -> OperationRecord:
-    """The same adapter envelope, without a durable runtime for the two baselines."""
-    tool.validate(operation)
-    now = datetime.now(UTC).isoformat()
-    return OperationRecord(
-        key=operation.key,
-        scope=operation.scope,
-        approval_ref=operation.approval_ref,
-        tool_name=tool.name,
-        contract_version=tool.contract_version,
-        payload_json=encode_arguments(operation.arguments),
-        knowledge=Knowledge.UNKNOWN,
-        phase=Phase.RESERVED,
-        reason="Unpersisted baseline request envelope.",
-        receipt_json=None,
-        created_at=now,
-        updated_at=now,
-    )
-
-
 async def _run_case(
     directory: Path, scenario: Scenario, policy: LabPolicy, budget: RecoveryBudget
 ) -> LabCaseResult:
@@ -267,7 +245,7 @@ async def _run_case(
                 if policy is LabPolicy.EFFECT_BOUNDARY
                 else None
             )
-            baseline_record = _unmanaged_record(operation, original)
+            baseline_record = unmanaged_record(operation, original)
             if runtime is not None:
                 first = await runtime.perform(operation, tool=original)
                 if isinstance(first, BlockedByUnresolvedEffect):
@@ -285,7 +263,7 @@ async def _run_case(
                 clock.trace.append(TraceStep(1, "proposal", proposal.operation_id, alternate.name))
                 if policy is LabPolicy.FRESH_RETRY:
                     knowledge = (
-                        await alternate.execute(_unmanaged_record(proposal, alternate))
+                        await alternate.execute(unmanaged_record(proposal, alternate))
                     ).knowledge
                 elif runtime is not None:
                     proposed = await runtime.perform(proposal, tool=alternate)
@@ -322,20 +300,7 @@ async def _run_case(
             await clock.stop()
 
     # Ground truth is read only after all policy decisions and late provider work.
-    refunds = ledger.refunds()
-    effects = len(refunds)
-    matching = sum(
-        refund.key.tenant == operation.scope.tenant
-        and refund.key.account == operation.scope.account
-        and refund.resource == operation.scope.resource
-        and refund.amount_minor == operation.arguments["amount_minor"]
-        and refund.currency == operation.arguments["currency"]
-        for refund in refunds
-    )
-    pending = ledger.pending_count()
-    completed = knowledge is Knowledge.APPLIED and effects == matching == 1 and pending == 0
-    excluded = knowledge is Knowledge.NOT_APPLIED_FINAL and effects == 0 and pending == 0
-    false_claims = int(knowledge is not Knowledge.UNKNOWN and not (completed or excluded))
+    evaluation = evaluate_refund(ledger, operation, knowledge)
     return LabCaseResult(
         scenario=scenario,
         policy=policy,
@@ -344,14 +309,14 @@ async def _run_case(
         replan_proposals=proposals,
         prevented_writes=prevented,
         boundary_blocks=boundary_blocks,
-        actual_effects=effects,
-        invalid_effects=effects - matching,
-        duplicate_effects=max(0, effects - 1),
-        pending_at_horizon=pending,
+        actual_effects=evaluation.actual_effects,
+        invalid_effects=evaluation.invalid_effects,
+        duplicate_effects=evaluation.duplicate_effects,
+        pending_at_horizon=evaluation.pending_requests,
         outcome=knowledge,
-        false_terminal_claims=false_claims,
-        valid_completion=completed,
-        correct_resolution=completed or excluded,
+        false_terminal_claims=evaluation.false_terminal_claims,
+        valid_completion=evaluation.valid_completion,
+        correct_resolution=evaluation.correct_resolution,
         trace=tuple(clock.trace),
     )
 

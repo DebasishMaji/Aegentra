@@ -17,9 +17,11 @@ and a SQLite journal are not, by themselves, a new research result.
 ## Current artifact
 
 The repository contains a conservative reference runtime, a persistent scenario
-provider, and a [scripted comparison laboratory](laboratory.md). It has no LLM
-integration, learned recovery policy, or production provider adapter. Laboratory
-counts are reproducible counterexamples, not comparative model-benchmark results.
+provider, a [scripted comparison laboratory](laboratory.md), and a
+[model-free adversarial testing agent](adversarial-testing.md). It has no LLM
+integration, learned recovery policy, or production provider adapter. Search and
+laboratory counts are reproducible counterexamples, not comparative
+model-benchmark results.
 
 The provider can acknowledge, lose the acknowledgment, commit after a timeout,
 reject before execution, or offer no usable outcome lookup. Its evaluator view
@@ -40,6 +42,14 @@ on these single-process cases; that agreement is useful, not a result to hide.
 The frozen logical schedule lets a pending effect complete after a policy stops.
 Completion, correct rejection, unresolved outcomes, and false claims are reported
 separately. This is a starting artifact, not the evaluation plan below completed.
+
+The testing agent adds feedback-guided fault exploration, invariant-specific
+shrinking, and versioned replay artifacts. Its oracle sees provider state that
+the client cannot inspect. Prefix checks catch false success before a pending
+effect becomes an eventual duplicate. A counterexample found against the unsafe
+client is replayed unchanged against the boundary; a later recovery lookup is
+a different trace and must be labeled separately. An exhausted heuristic search
+is not exhaustive verification.
 
 ## Evaluation plan
 
