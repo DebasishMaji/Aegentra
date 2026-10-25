@@ -228,10 +228,34 @@ See the [laboratory contract](docs/laboratory.md) and
 [research decision gates](docs/research.md). There are no published comparative
 model results or established novelty claims.
 
-The [adversarial testing agent](docs/adversarial-testing.md) explores mutations of
-benign fault sequences, checks actual provider effects independently, and shrinks
-counterexamples into replayable cases. Its bounded behavioral search is not a
-safety proof or an LLM benchmark.
+## Let the testing agent find the failure
+
+```sh
+uv run python examples/adversarial_testing.py --case-out counterexample.json
+```
+
+The agent starts from a benign control, explores mutations using behavioral
+feedback, and checks the provider's actual effects independently. It then shrinks
+the failure and replays the same case against Aegentra.
+
+The default demo finds a lost-acknowledgment counterexample and reduces it to one
+action: replan through another tool. The unsafe client creates two refunds.
+Aegentra blocks the fresh proposal and preserves one refund, still unresolved.
+A separately labeled extended trace adds the evidence needed to confirm success.
+
+Use the JSON CLI for automation:
+
+```sh
+# Exit 3 means an invariant violation was found, not a command failure.
+uv run aegentra test-agent --case-out another-case.json > search-report.json
+uv run aegentra replay-test another-case.json --target unsafe_retry
+uv run aegentra replay-test another-case.json --target aegentra
+```
+
+Case files must be new. There is no model, API key, or production provider.
+This bounded search is not a safety proof or an LLM benchmark.
+See the [testing-agent contract](docs/adversarial-testing.md) for budgets,
+invariants, artifact validation, and the meaning of minimality.
 
 ## Development
 

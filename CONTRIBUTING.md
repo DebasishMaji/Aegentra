@@ -41,3 +41,10 @@ The laboratory's `refund-replanning/1` schedule is a versioned experimental
 contract. Give every policy the same identity and budgets. Do not move a late
 effect outside the evaluation horizon, count a rejection as a completed refund,
 or remove the competent baseline because it matches the boundary.
+
+The testing agent's `refund-adversary/1` harness has its own replay contract.
+Preserve deterministic case interpretation, check actual provider effects
+independently of client claims, and replay every shrink candidate from fresh
+state. A reducer must preserve the requested invariant, not merely any failure.
+Do not imply that an exhausted search proves safety or hide a recovery lookup
+inside a supposedly identical comparison trace.

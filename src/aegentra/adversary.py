@@ -119,7 +119,7 @@ def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise TestCaseError(f"Duplicate JSON field: {key}.")
+            raise TestCaseError(f"Duplicate JSON field: {key!r}.")
         result[key] = value
     return result
 

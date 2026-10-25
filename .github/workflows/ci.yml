@@ -25,6 +25,7 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest
       - run: uv run python examples/refund_recovery.py
+      - run: uv run python examples/adversarial_testing.py
       - run: uv build
       - name: Exercise the installed wheel outside the checkout
         run: |
@@ -38,3 +39,17 @@ jobs:
           "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" trace "$RUNNER_TEMP/aegentra-demo/agent.sqlite3" \
             --tenant shop --account payments --operation-id approved-refund-42 \
             > "$RUNNER_TEMP/aegentra-demo-trace.json"
+          "$RUNNER_TEMP/aegentra-wheel/bin/python" "$GITHUB_WORKSPACE/examples/adversarial_testing.py"
+          search_status=0
+          "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" test-agent \
+            --case-out "$RUNNER_TEMP/aegentra-counterexample.json" \
+            > "$RUNNER_TEMP/aegentra-search.json" || search_status=$?
+          test "$search_status" -eq 3
+          replay_status=0
+          "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" replay-test \
+            "$RUNNER_TEMP/aegentra-counterexample.json" --target unsafe_retry \
+            > "$RUNNER_TEMP/aegentra-unsafe.json" || replay_status=$?
+          test "$replay_status" -eq 3
+          "$RUNNER_TEMP/aegentra-wheel/bin/aegentra" replay-test \
+            "$RUNNER_TEMP/aegentra-counterexample.json" --target aegentra \
+            > "$RUNNER_TEMP/aegentra-guarded.json"

@@ -1,4 +1,4 @@
-"""Read-only operator commands and a disposable, explicitly scripted laboratory."""
+"""Read-only operator commands and disposable fault experiments."""
 
 from __future__ import annotations
 
@@ -11,6 +11,16 @@ from collections.abc import Sequence
 from importlib.metadata import version
 
 from ._serialization import key_dict, record_dict
+from .adversary import (
+    MAX_ACTIONS,
+    FaultSearchAgent,
+    Invariant,
+    SearchBudget,
+    Target,
+    load_case,
+    run_trial,
+    save_case,
+)
 from .errors import AegentraError
 from .inspection import Inspection
 from .lab import run_lab
@@ -47,9 +57,17 @@ def _positive(value: str) -> int:
     return result
 
 
+def _depth(value: str) -> int:
+    result = _sequence(value)
+    if result > MAX_ACTIONS:
+        raise argparse.ArgumentTypeError(f"must be between 0 and {MAX_ACTIONS}")
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
+    budget = SearchBudget()
     parser = argparse.ArgumentParser(
-        prog="aegentra", description="Inspect effect obligations or run the scripted failure lab."
+        prog="aegentra", description="Inspect effect obligations or explore sandbox failures."
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {version('aegentra')}")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -57,6 +75,22 @@ def _parser() -> argparse.ArgumentParser:
         "lab", help="run deterministic refund counterexamples in temporary files"
     )
     lab.add_argument("--max-observations", type=_positive, default=2)
+    agent = commands.add_parser("test-agent", help="search and shrink sandbox counterexamples")
+    agent.add_argument("--target", choices=[item.value for item in Target], default="unsafe_retry")
+    agent.add_argument(
+        "--goal", choices=[item.value for item in Invariant], default="duplicate_effect"
+    )
+    agent.add_argument("--max-trials", type=_positive, default=budget.max_trials)
+    agent.add_argument("--max-steps", type=_depth, default=budget.max_steps)
+    agent.add_argument("--max-shrink-trials", type=_sequence, default=budget.max_shrink_trials)
+    agent.add_argument(
+        "--case-out",
+        type=_nonempty,
+        help="save a found goal case after bounded shrinking; never overwrite",
+    )
+    replay = commands.add_parser("replay-test", help="replay a versioned sandbox case")
+    replay.add_argument("case", type=_nonempty)
+    replay.add_argument("--target", choices=[item.value for item in Target], required=True)
     listing = commands.add_parser("list", help="list unresolved operations by default")
     listing.add_argument("journal")
     listing.add_argument("--tenant", type=_nonempty)
@@ -120,9 +154,33 @@ def _query(reader: Inspection, arguments: argparse.Namespace) -> dict[str, JSONV
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
+    exit_code = 0
     try:
         if arguments.command == "lab":
             report = asyncio.run(run_lab(max_observations=arguments.max_observations)).as_dict()
+        elif arguments.command == "test-agent":
+            agent = FaultSearchAgent(
+                SearchBudget(
+                    max_trials=arguments.max_trials,
+                    max_steps=arguments.max_steps,
+                    max_shrink_trials=arguments.max_shrink_trials,
+                )
+            )
+            search = asyncio.run(
+                agent.search(target=Target(arguments.target), goal=Invariant(arguments.goal))
+            )
+            report = search.as_dict()
+            report["case_file"] = None
+            if arguments.case_out is not None and search.reduction is not None:
+                save_case(search.reduction.result.case, arguments.case_out)
+                report["case_file"] = arguments.case_out
+            exit_code = 3 if search.observed_invariants else 0
+        elif arguments.command == "replay-test":
+            trial = asyncio.run(
+                run_trial(load_case(arguments.case), target=Target(arguments.target))
+            )
+            report = trial.as_dict()
+            exit_code = 3 if trial.violations else 0
         else:
             with Inspection(arguments.journal) as reader:
                 report = _query(reader, arguments)
@@ -130,4 +188,4 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (AegentraError, sqlite3.Error, OSError) as exc:
         print(f"aegentra: error: {exc}", file=sys.stderr)
         return 1
-    return 0
+    return exit_code

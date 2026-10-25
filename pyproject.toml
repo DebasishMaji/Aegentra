@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegentra"
-version = "0.2.0a1"
+version = "0.3.0a1"
 description = "Keep unresolved tool effects from becoming fresh agent actions."
 readme = "README.md"
 license = "Apache-2.0"

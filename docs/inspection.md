@@ -50,6 +50,11 @@ can therefore reflect intervening commits; use the Python API for a single
 snapshot spanning several pages. Keyset pagination is not a change feed.
 
 Arguments and receipts require `--include-payload`. Protect exported metadata too.
-Commands never write to the journal, load provider adapters, or manually declare
-an effect settled. Success exits 0, operational errors exit 1 with a message on
-stderr, and argument errors exit 2. JSON data is written only to stdout.
+These operator commands never write to the journal, load provider adapters, or
+manually declare an effect settled. Success exits 0, operational errors exit 1
+with a message on stderr, and argument errors exit 2. JSON data is written only
+to stdout.
+
+`lab`, `test-agent`, and `replay-test` are separate sandbox commands, not journal
+operators. The [testing-agent commands](adversarial-testing.md) also use exit 3
+for invariant findings.

@@ -9,6 +9,52 @@ behavioral-transition feedback, not model-generated judgments of correctness.
 It is a small domain-specific testing agent, not a general-purpose test-writing
 framework or a claim of algorithmic novelty.
 
+## Run the demo
+
+```sh
+uv run python examples/adversarial_testing.py --case-out counterexample.json
+```
+
+The demo shows the discovered sequence, deletion probes, independent provider
+state at every step, and the identical reduced input against both targets.
+Safety and completion are separate: a blocked duplicate can leave the original
+operation unresolved. An additional recovery sequence is labeled as a different
+input, not silently added to the matched comparison.
+
+Omit `--case-out` to leave no replay artifact. Temporary trial databases are
+removed in either mode.
+
+## Search and replay from the CLI
+
+```sh
+uv run aegentra test-agent --case-out counterexample.json > search.json
+uv run aegentra replay-test counterexample.json --target unsafe_retry > unsafe.json
+uv run aegentra replay-test counterexample.json --target aegentra > guarded.json
+```
+
+Search defaults to the unsafe target and the `duplicate_effect` goal. Set
+`--target aegentra` to explore the guarded implementation. Replay always requires
+an explicit target. All CLI reports are JSON on stdout; operational errors go
+to stderr.
+
+| Exit | Meaning |
+|---|---|
+| `0` | No invariant violation observed in this bounded search or replay. Not a safety proof. |
+| `3` | At least one invariant violation observed, including violations other than the requested goal. |
+| `1` | An operational error, including a malformed artifact or an unwritable output file. |
+| `2` | An argument error. |
+
+Search supports `--max-trials`, `--max-steps` (0-32), `--max-shrink-trials`, and
+`--goal` (`duplicate_effect`, `invalid_effect`, or `false_terminal_claim`).
+These goals select which failure ends search and is reduced; every trial still
+checks all three invariants.
+
+`--case-out` saves the best reduced case within the shrink allowance, only if the
+requested goal is found. A zero allowance can leave the original case unchanged.
+The report's `case_file` is null if nothing was saved. Existing paths are never
+overwritten; publication is not atomic or guaranteed durable across a host crash.
+If writing fails, the CLI reports an error rather than emitting a success report.
+
 ## Python API
 
 Inside an async function:
@@ -26,10 +72,11 @@ if report.reduction is not None:
 
 `SearchBudget` sets three independent limits: `max_trials` for exploration,
 `max_steps` for actions after the initial dispatch, and `max_shrink_trials` for
-minimization probes. Reports count exploration and shrinking separately.
-They include the configured budget, the requested goal, and all observed
-invariant types. If another invariant fails but the requested goal is not found,
-the status is `other_failure_found`, not a clean search.
+minimization probes. Defaults are 64 exploration trials, eight actions, and 64
+shrink probes. Reports count exploration and shrinking separately.
+They include the configured budget, the requested goal, and all invariant types
+observed during exploration. If another invariant fails but the requested goal
+is not found, the status is `other_failure_found`, not a clean search.
 There is no cost hidden outside those counts; a caller's additional comparative
 replay is a separate trial.
 

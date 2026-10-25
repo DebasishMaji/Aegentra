@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from aegentra import Operation, Runtime
+from aegentra.adversary import Action, load_case
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
 
 KEY_ARGS = ["--tenant", "tenant-a", "--account", "payments", "--operation-id", "refund-42"]
@@ -195,3 +196,129 @@ def test_retained_example_can_be_inspected_and_refuses_to_overwrite(tmp_path: Pa
     assert repeated.returncode == 2
     assert "Cannot create demo directory" in repeated.stderr
     assert (directory / "agent.sqlite3").read_bytes() == before
+
+
+def test_agent_discovers_saves_and_replays_a_counterexample(tmp_path: Path) -> None:
+    path = tmp_path / "counterexample.json"
+    result = run_cli("test-agent", "--case-out", str(path))
+    assert result.returncode == 3, result.stderr
+    assert result.stderr == ""
+    report = json.loads(result.stdout)
+    assert report["kind"] == "adversarial_search"
+    assert report["goal_found"]
+    assert report["status"] == "failure_found"
+    assert report["case_file"] == str(path)
+    assert report["budget"]["max_trials"] == 64
+    assert report["reduction"]["one_minimal"]
+    assert load_case(path).as_dict() == report["reduction"]["result"]["case"]
+
+    unsafe = run_cli("replay-test", str(path), "--target", "unsafe_retry")
+    assert unsafe.returncode == 3, unsafe.stderr
+    assert unsafe.stderr == ""
+    assert json.loads(unsafe.stdout)["actual_effects"] == 2
+
+    guarded = run_cli("replay-test", str(path), "--target", "aegentra")
+    assert guarded.returncode == 0, guarded.stderr
+    assert guarded.stderr == ""
+    replay = json.loads(guarded.stdout)
+    assert replay["case"] == report["reduction"]["result"]["case"]
+    assert replay["actual_effects"] == 1
+    assert replay["blocked_proposals"] == 1
+    assert replay["violations"] == []
+    assert not replay["valid_completion"]
+
+
+def test_exhausted_search_does_not_create_an_artifact(tmp_path: Path) -> None:
+    path = tmp_path / "not-found.json"
+    result = run_cli("test-agent", "--max-trials", "1", "--case-out", str(path))
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "no_failure_found"
+    assert report["stop_reason"] == "trial_budget_exhausted"
+    assert report["case_file"] is None
+    assert not path.exists()
+
+
+def test_non_goal_findings_still_return_the_violation_exit_code(tmp_path: Path) -> None:
+    path = tmp_path / "no-goal.json"
+    result = run_cli("test-agent", "--goal", "invalid_effect", "--case-out", str(path))
+    assert result.returncode == 3, result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "other_failure_found"
+    assert "duplicate_effect" in report["observed_invariants"]
+    assert not report["goal_found"]
+    assert report["case_file"] is None
+    assert not path.exists()
+
+
+def test_case_output_cannot_overwrite_an_existing_artifact(tmp_path: Path) -> None:
+    path = tmp_path / "existing.json"
+    path.write_text("preserve this")
+    result = run_cli("test-agent", "--case-out", str(path))
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "aegentra: error:" in result.stderr
+    assert path.read_text() == "preserve this"
+
+
+def test_zero_shrink_allowance_exports_a_case_without_claiming_minimality(tmp_path: Path) -> None:
+    path = tmp_path / "unreduced.json"
+    result = run_cli("test-agent", "--max-shrink-trials", "0", "--case-out", str(path))
+    assert result.returncode == 3, result.stderr
+    report = json.loads(result.stdout)
+    assert report["shrink_trials"] == 0
+    assert not report["reduction"]["one_minimal"]
+    assert load_case(path).as_dict() == report["failure"]["case"]
+
+
+@pytest.mark.parametrize("payload", ['{"format_version":true}', '{"harness":', "null"])
+def test_replay_reports_malformed_cases_on_stderr(tmp_path: Path, payload: str) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_text(payload)
+    result = run_cli("replay-test", str(path), "--target", "aegentra")
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "aegentra: error:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["test-agent", "--max-trials", "0"],
+        ["test-agent", "--max-steps", "-1"],
+        ["test-agent", "--max-steps", "33"],
+        ["test-agent", "--max-shrink-trials", "-1"],
+        ["test-agent", "--goal", "all_clear"],
+        ["test-agent", "--target", "production"],
+        ["test-agent", "--case-out", ""],
+        ["replay-test", "case.json"],
+        ["replay-test", "case.json", "--target", "production"],
+    ],
+)
+def test_testing_commands_reject_bad_arguments(arguments: list[str]) -> None:
+    result = run_cli(*arguments)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "error:" in result.stderr
+
+
+def test_adversarial_demo_separates_matched_replay_from_recovery(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "examples" / "adversarial_testing.py"
+    path = tmp_path / "discovered.json"
+    result = subprocess.run(
+        [sys.executable, str(script), "--case-out", str(path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert "single-deletion minimal: True" in result.stdout
+    assert "Aegentra: exactly the same case" in result.stdout
+    assert "matched replay is still unresolved" in result.stdout
+    assert "extended recovery trace (different input)" in result.stdout
+    assert "Valid completion: False" in result.stdout
+    assert "Valid completion: True" in result.stdout
+    assert load_case(path).actions == (Action.REPLAN,)
