@@ -169,7 +169,8 @@ event sequence numbers are preserved; old events have no blocked-action metadata
 An unknown version or an unrelated database fails explicitly. Existing operations
 pin the tool name and contract version; a journal upgrade does not change those
 contracts or make an unresolved operation retryable. An older runtime cannot
-open the upgraded schema. Back up important journals before changing versions.
+open the upgraded schema. Capture an inspection archive before changing versions;
+it is evidence for operators, not automatically safe rollback state.
 
 New database and lock files use mode `0600`. Existing permissions are preserved.
 Arguments and receipts are plaintext. File permissions do not provide encryption
@@ -177,7 +178,15 @@ or tenant-level access control. Use deployment-level protections and keep
 credentials out of payloads.
 
 No automatic retention deletes unresolved operations. The alpha has no pruning
-API, backup coordination, or downgrade path.
+API, snapshot promotion, or downgrade path. `Runtime(..., require_existing=True)`
+rejects missing or uninitialized journals rather than creating fresh authority.
+The default still permits deliberate first-time provisioning.
+
+Read-only inspection validates supported layouts without migrating. Consistent
+full-database snapshots use SQLite backup and an inspection-only application/version
+marker that old and current writers reject. WAL activation is checked explicitly.
+See [operations](operations.md) for atomic publication, data protection,
+cooperative time budgets, and the hazards of restoring old provider obligations.
 
 ## Deliberate limits
 

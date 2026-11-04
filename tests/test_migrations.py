@@ -17,6 +17,7 @@ from aegentra import (
     OperationRecord,
     Phase,
     Runtime,
+    journal,
 )
 from aegentra.models import encode_arguments
 from aegentra.sandbox import RefundLedger, RefundTool
@@ -136,12 +137,16 @@ async def test_v1_settled_results_are_preserved_without_provider_calls(
 
 
 def test_failed_upgrade_rolls_back_all_schema_changes_and_releases_ownership(
-    legacy_journal: Path, operation: Operation
+    legacy_journal: Path, operation: Operation, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_operation(legacy_journal, operation)
     with sqlite3.connect(legacy_journal) as db:
-        db.execute("ALTER TABLE events ADD COLUMN requested_tool_name TEXT")
         original_columns = list(db.execute("PRAGMA table_info(events)"))
+    monkeypatch.setattr(
+        journal,
+        "_UPGRADE_V1_TO_V2",
+        (*journal._UPGRADE_V1_TO_V2, "ALTER TABLE events ADD COLUMN requested_tool_name TEXT"),
+    )
     for _ in range(2):
         with pytest.raises(sqlite3.OperationalError, match="duplicate column"):
             Runtime(legacy_journal)

@@ -9,6 +9,7 @@ from .errors import (
     JournalVersionError,
     OperationNotFound,
     RuntimeUsageError,
+    SnapshotUsageError,
 )
 from .inspection import Inspection
 from .models import (
@@ -32,6 +33,7 @@ from .models import (
 )
 from .recovery import RecoveryBudget
 from .runtime import Runtime
+from .snapshot import DatabaseSnapshot, SnapshotInfo, snapshot_database
 from .tool import Tool
 
 __all__ = [
@@ -64,4 +66,8 @@ __all__ = [
     "RuntimeUsageError",
     "Tool",
     "Unresolved",
+    "DatabaseSnapshot",
+    "SnapshotInfo",
+    "SnapshotUsageError",
+    "snapshot_database",
 ]

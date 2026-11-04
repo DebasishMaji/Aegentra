@@ -25,6 +25,7 @@ from .errors import AegentraError
 from .inspection import Inspection
 from .lab import run_lab
 from .models import JSONValue, Knowledge, OperationKey
+from .snapshot import deadline_for, snapshot_database
 
 
 def _nonempty(value: str) -> str:
@@ -38,8 +39,8 @@ def _sequence(value: str) -> int:
         result = int(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("must be a nonnegative integer") from exc
-    if result < 0:
-        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    if not 0 <= result <= 2**63 - 1:
+        raise argparse.ArgumentTypeError("must be a nonnegative SQLite integer")
     return result
 
 
@@ -61,6 +62,15 @@ def _depth(value: str) -> int:
     result = _sequence(value)
     if result > MAX_ACTIONS:
         raise argparse.ArgumentTypeError(f"must be between 0 and {MAX_ACTIONS}")
+    return result
+
+
+def _timeout(value: str) -> float:
+    try:
+        result = float(value)
+        deadline_for(result)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive finite number") from exc
     return result
 
 
@@ -91,6 +101,17 @@ def _parser() -> argparse.ArgumentParser:
     replay = commands.add_parser("replay-test", help="replay a versioned sandbox case")
     replay.add_argument("case", type=_nonempty)
     replay.add_argument("--target", choices=[item.value for item in Target], required=True)
+    status = commands.add_parser(
+        "status", help="read-only structural checks; not provider evidence"
+    )
+    status.add_argument("journal", type=_nonempty)
+    status.add_argument("--timeout", type=_timeout, default=5.0)
+    snapshot = commands.add_parser(
+        "snapshot", help="capture all tenants and payloads into an inspection-only artifact"
+    )
+    snapshot.add_argument("journal", type=_nonempty)
+    snapshot.add_argument("--out", type=_nonempty, required=True)
+    snapshot.add_argument("--timeout", type=_timeout, default=30.0)
     listing = commands.add_parser("list", help="list unresolved operations by default")
     listing.add_argument("journal")
     listing.add_argument("--tenant", type=_nonempty)
@@ -119,6 +140,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _query(reader: Inspection, arguments: argparse.Namespace) -> dict[str, JSONValue]:
+    if arguments.command == "status":
+        return reader.status(timeout_seconds=arguments.timeout)
     if arguments.command == "list":
         page = reader.list_operations(
             knowledge=None if arguments.knowledge == "all" else Knowledge(arguments.knowledge),
@@ -181,9 +204,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             report = trial.as_dict()
             exit_code = 3 if trial.violations else 0
+        elif arguments.command == "snapshot":
+            report = snapshot_database(
+                arguments.journal, arguments.out, timeout_seconds=arguments.timeout
+            ).as_dict()
         else:
             with Inspection(arguments.journal) as reader:
                 report = _query(reader, arguments)
+                if reader.snapshot_info is not None:
+                    report["snapshot"] = reader.snapshot_info.as_dict()
+                if arguments.command == "status":
+                    exit_code = 0 if report["healthy"] else 3
         print(json.dumps(report, indent=2, sort_keys=True))
     except (AegentraError, sqlite3.Error, OSError) as exc:
         print(f"aegentra: error: {exc}", file=sys.stderr)

@@ -10,6 +10,7 @@ from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ._format import read_format
 from ._read import decode_record, get_events, get_record, key_values
 from .errors import (
     AdapterMismatch,
@@ -97,8 +98,11 @@ def _now() -> str:
 
 
 class Journal:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, require_existing: bool = False) -> None:
+        if not isinstance(require_existing, bool):
+            raise TypeError("require_existing must be a boolean.")
         self.path = path.resolve()
+        self._require_existing = require_existing
         with ExitStack() as resources:
             lock_fd = os.open(f"{self.path}.lock", os.O_RDWR | os.O_CREAT, 0o600)
             resources.callback(os.close, lock_fd)
@@ -109,16 +113,20 @@ class Journal:
 
             # Keep the lock inode: unlinking it lets a third process lock a different file.
             resources.callback(fcntl.flock, lock_fd, fcntl.LOCK_UN)
-            db_fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+            db_fd = os.open(self.path, os.O_RDWR | (0 if require_existing else os.O_CREAT), 0o600)
             os.close(db_fd)
-            self._db = sqlite3.connect(self.path, isolation_level=None)
+            self._db = sqlite3.connect(
+                f"{self.path.as_uri()}?mode=rw", uri=True, isolation_level=None
+            )
             resources.callback(self._db.close)
             self._db.row_factory = sqlite3.Row
             self._db.execute("PRAGMA foreign_keys = ON")
             self._db.execute("PRAGMA busy_timeout = 5000")
             self._db.execute("PRAGMA synchronous = FULL")
             self._initialize()
-            self._db.execute("PRAGMA journal_mode = WAL")
+            mode = self._db.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            if mode != "wal":
+                raise JournalVersionError("Aegentra requires SQLite write-ahead logging.")
             self._resources = resources.pop_all()
 
     def close(self) -> None:
@@ -136,15 +144,20 @@ class Journal:
 
     def _initialize(self) -> None:
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        application = self._db.execute("PRAGMA application_id").fetchone()[0]
+        if version != 0 or application != 0:
+            read_format(self._db)
         if version == _SCHEMA_VERSION:
             return
         if version not in (0, 1):
             raise JournalVersionError(f"Unsupported journal version {version}.")
         with self._transaction():
             if version == 0:
+                if self._require_existing:
+                    raise JournalVersionError("An initialized existing journal is required.")
                 tables = self._db.execute(
                     """SELECT name FROM sqlite_master
-                       WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"""
+                       WHERE name NOT LIKE 'sqlite_%'"""
                 ).fetchall()
                 if tables:
                     raise JournalVersionError("Refusing to initialize an unrecognized database.")

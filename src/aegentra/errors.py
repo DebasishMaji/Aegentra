@@ -31,3 +31,7 @@ class JournalVersionError(AegentraError):
 
 class RuntimeUsageError(AegentraError):
     """The runtime is closed, busy, or used outside its owning thread or event loop."""
+
+
+class SnapshotUsageError(AegentraError):
+    """An inspection artifact was proposed as live state or as a new snapshot source."""

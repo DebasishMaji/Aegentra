@@ -40,8 +40,8 @@ def _outcome(record: OperationRecord) -> ConfirmedApplied | ConfirmedNotApplied 
 
 
 class Runtime:
-    def __init__(self, journal_path: str | Path) -> None:
-        self._journal = Journal(Path(journal_path))
+    def __init__(self, journal_path: str | Path, *, require_existing: bool = False) -> None:
+        self._journal = Journal(Path(journal_path), require_existing=require_existing)
         self._owner = os.getpid(), threading.get_ident()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._active: set[OperationKey] = set()
