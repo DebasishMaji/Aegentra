@@ -9,14 +9,15 @@ showing the old behavior and the expected external effects. A timeout is not
 proof of failure; a fresh planner call ID is not necessarily a fresh business
 operation.
 
-Set up the development environment with `uv sync --locked`, then run:
+Set up the development environment with `uv sync --locked --extra langgraph`, then run:
 
 ```sh
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy
-uv run aegentra lab
+uv run --extra langgraph pytest
+uv run --extra langgraph ruff check .
+uv run --extra langgraph ruff format --check .
+uv run --extra langgraph mypy
+uv run --extra langgraph aegentra lab
+uv run --extra langgraph python examples/langgraph_refund.py
 uv build
 ```
 
@@ -36,6 +37,12 @@ Read-only inspection must stay read-only, including for legacy journals.
 Arguments and receipts must remain opt-in in exported traces. Exercise the
 installed wheel as well as the editable checkout when changing packaging or CLI
 entry points.
+
+Optional integrations must not enter the core import path. Exercise their tools
+inside a compiled graph, including invalid arguments, cancellation, and provider
+exceptions. A framework-level successful tool response is not a confirmed
+business effect. Never let a model choose the operation ID, approval reference,
+scope, or approved payload through the bound-operation tool.
 
 The laboratory's `refund-replanning/1` schedule is a versioned experimental
 contract. Give every policy the same identity and budgets. Do not move a late
