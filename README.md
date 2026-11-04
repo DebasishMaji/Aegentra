@@ -1,67 +1,155 @@
 # Aegentra
 
-A timeout tells you what the client saw, not what the provider did.
+### A timeout is not permission to try again.
 
-Aegentra keeps an unresolved tool operation from becoming a fresh agent action.
-It records the intended operation before dispatch, blocks conflicting writes in
-the same declared effect scope, and reconciles through provider evidence.
+[![CI](https://github.com/DebasishMaji/Aegentra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DebasishMaji/Aegentra/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Research alpha](https://img.shields.io/badge/status-research%20alpha-orange)](docs/research.md)
 
-**Research alpha.** Python 3.11+, macOS and Linux. No runtime dependencies.
-This version permits one possible dispatch per operation. It does not retry writes.
+An agent requests a refund. The provider processes it. The response disappears.
+The agent tries a different tool with a fresh call ID. Now there are two refunds.
 
-The package contains a focused execution library, a read-only operator CLI, a
-scripted failure laboratory, and a model-free adversarial testing agent. It is
-not a general-purpose agent framework or a workflow engine.
+**Aegentra puts a durable boundary between an uncertain outcome and the next
+write.** It records the authorized intent before dispatch, blocks new writes in
+the same application-declared effect scope while the outcome is unresolved, and
+reconciles through provider evidence.
 
-## The failure that matters
+Python 3.11+ | Standard-library core | Optional LangGraph integration | macOS and Linux
 
-```text
-Agent calls refund_payment()
-Provider creates the refund
-The acknowledgment is lost
-Agent replans and calls refund_order() with a new ID
-```
+> [!IMPORTANT]
+> Research alpha, not a production payment integration. This version permits one
+> possible dispatch per operation; it does not retry writes. Business identity
+> and provider observations come from trusted application adapters.
 
-Deduplicating the first call's ID is not enough if the planner invents a second
-one. Aegentra can block that second write when the application has mapped both
-tools to the same business-effect scope:
+[Run the demo](#watch-the-failure-happen) |
+[LangGraph integration](docs/langgraph.md) |
+[Use the API](#put-a-boundary-around-a-write) |
+[Evaluate the fit](#when-is-this-worth-integrating) |
+[Read the contracts](#design-and-research)
+
+## The identity that a retry key can miss
+
+The agent's tool call is not necessarily the business operation.
+`refund_payment` and `refund_order` may produce the same effect despite having
+different call IDs. Aegentra can connect them through a shared scope:
 
 ```text
 tenant / provider account / order / refund
 ```
 
-Scope mappings come from the application and trusted adapters. They are not
-inferred from tool names or model judgments.
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Boundary as Aegentra
+    participant Provider
 
-## Run the example
+    Agent->>Boundary: refund_payment(order-42)
+    Boundary->>Boundary: Persist intent and reserve scope
+    Boundary->>Provider: Dispatch
+    Provider->>Provider: Create refund
+    Provider--xBoundary: Acknowledgment lost
+    Agent->>Boundary: refund_order(order-42, new call ID)
+    Boundary-->>Agent: Blocked: effect still unresolved
+    Note over Boundary: Restart does not release the unresolved scope
+    Boundary->>Provider: Read-only lookup of original request
+    Provider-->>Boundary: Matching receipt
+    Boundary-->>Agent: ConfirmedApplied
+```
+
+The application must declare that shared scope. Aegentra does not infer equivalent
+actions from names, arguments, or model judgments. Provider-side idempotency
+remains valuable; this boundary is not a replacement for it.
+A settled scope is not a permanent deduplication key: a new, independently
+authorized operation can write again.
+
+## Watch the failure happen
+
+With [uv](https://docs.astral.sh/uv/) installed:
 
 ```sh
+git clone https://github.com/DebasishMaji/Aegentra.git
+cd Aegentra
 uv sync --locked
-uv run python examples/refund_recovery.py
+uv run python examples/adversarial_testing.py
 ```
 
-The example uses two separate SQLite files: the agent journal and a persistent
-sandbox provider. The provider applies a refund but loses the response. A fresh
-call through another tool is blocked. After the runtime restarts, a read-only
-lookup confirms the original refund. There is still only one provider effect.
+**No API key, model, or external service.** The model-free testing agent explores
+a persistent refund sandbox, checks actual provider effects independently, and
+reduces a failing trace. Selected lines from the default run:
 
-No API key, model, or external service is required.
+```text
+Discovered scenario: lost_acknowledgment
+Found actions: replan -> advance -> observe
+Reduced 3 actions to 1 using 5 fresh probes; single-deletion minimal: True.
+Reduced actions: replan
+```
 
-To keep the journals and explore the result yourself:
+The demo then runs the reduced case against both clients:
+
+| Replay | Actual refunds | Final client knowledge | Invariant violations |
+|---|---:|---|---|
+| Unsafe client, reduced case | 2 | Applied | Duplicate effect; false terminal claim |
+| Aegentra, identical case | 1 | Unknown | None observed |
+| Aegentra, extended recovery trace | 1 | Applied | None observed |
+
+**Safety is not completion.** The identical replay remains unresolved behind
+Aegentra. The third row is a separate input that adds `advance -> observe` to
+obtain confirmation. The unsafe client is deliberately defective, not a strong
+research baseline.
+
+This search is specific to the included sandbox. It does not test arbitrary
+third-party agents or establish universal safety.
+
+<details>
+<summary><strong>Save a counterexample and replay it from the CLI</strong></summary>
 
 ```sh
-uv run python examples/refund_recovery.py --directory ./refund-demo
-uv run aegentra list refund-demo/agent.sqlite3 --knowledge all
-uv run aegentra trace refund-demo/agent.sqlite3 \
-  --tenant shop --account payments --operation-id approved-refund-42
+# Expected exit 3: an invariant violation was found.
+uv run aegentra test-agent --case-out counterexample.json > search-report.json
+
+# Expected exit 3: the same failure reproduces.
+uv run aegentra replay-test counterexample.json --target unsafe_retry
+
+# Expected exit 0: no invariant violation in this bounded replay.
+uv run aegentra replay-test counterexample.json --target aegentra
 ```
 
-The directory must be new. The example refuses to overwrite an existing run.
-Without `--directory`, it removes its temporary files when it finishes.
+Case files must be new. Reports are JSON on stdout; operational errors go to
+stderr. Exit 0 is not a safety proof. See the
+[testing-agent contract](docs/adversarial-testing.md) for budgets, artifact
+validation, and the precise meaning of single-deletion minimality.
 
-## The API
+</details>
 
-Create operations in trusted application code, after authorizing their payloads:
+## Use your existing LangGraph tool node
+
+The optional integration exposes an application-approved operation as an async
+LangChain `StructuredTool`, usable in a LangGraph `ToolNode`:
+
+```sh
+uv sync --locked --extra langgraph
+uv run --extra langgraph python examples/langgraph_refund.py
+```
+
+The example runs a **real compiled graph** through a lost acknowledgment, an
+alternate tool proposal, and reconciliation after restart. The tool choices are
+scripted; it does not call a model or payment service.
+
+`operation_tool` snapshots the approved payload when bound. Its input schema has
+no arguments: the model cannot change the operation ID, scope, approval, or amount.
+Results explicitly distinguish confirmation, uncertainty, and blocking. The core
+package still has no third-party runtime dependencies.
+
+See the [integration guide](docs/langgraph.md) for graph wiring, async ownership,
+error handling, and the difference between tool execution and business success.
+Checkpoint-resume coverage also recreates the graph after reopening the runtime:
+the replayed tool reconciles its original reservation without another refund.
+The application must preserve both its graph checkpoint and live journal.
+
+## Put a boundary around a write
+
+Create the operation in trusted application code, after authorizing its payload:
 
 ```python
 from aegentra import EffectScope, Operation, Runtime
@@ -74,33 +162,50 @@ operation = Operation(
 )
 ```
 
-Inside an async function, supply an adapter implementing `Tool`:
+Inside an async function, pass your adapter implementing `Tool`. `refund_tool`
+below is your integration, not a bundled production connector:
 
 ```python
 with Runtime("agent.sqlite3") as runtime:
     outcome = await runtime.perform(operation, tool=refund_tool)
 ```
 
-Handle the outcome explicitly:
+There is no success-shaped fallback. Handle the outcome explicitly:
 
 | Outcome | What the application may conclude |
 |---|---|
 | `ConfirmedApplied` | The adapter supplied matching applied evidence and a receipt. |
 | `ConfirmedNotApplied` | The adapter established that this attempt cannot execute later. |
-| `Unresolved` | The available evidence does not establish either conclusion. |
-| `BlockedByUnresolvedEffect` | Another operation has an unresolved effect in this scope. |
+| `Unresolved` | Neither conclusion is established. Do not treat this as permission to retry. |
+| `BlockedByUnresolvedEffect` | Another operation has an unresolved effect in the declared scope. |
 
 Calling `perform` again with the same intent returns a settled result or performs
-a read-only reconciliation. It never calls `execute` again. Changing that
-operation's payload, approval reference, or scope raises `IntentConflict`.
-Recovery requires the original tool name and contract version.
+read-only reconciliation; it never calls `execute` again. Changing the bound
+payload, approval reference, or scope raises `IntentConflict`. Recovery requires
+the original tool name and contract version.
 
-`runtime.inspect(operation.key)` returns the durable record.
-`runtime.events(operation.key)` returns its ordered event history.
-`await runtime.reconcile(operation.key, tool=refund_tool)` performs an explicit
-read-only lookup.
+### The adapter is the trust boundary
 
-Inside an open runtime, pass an explicit budget for a bounded sequence of lookups:
+| Adapter member | Responsibility |
+|---|---|
+| `name`, `contract_version` | Pin the route and its semantics to the operation. |
+| `validate(operation)` | Reject invalid payloads or scopes before reservation. |
+| `execute(record)` | Make one possible write and return an `Observation`. |
+| `observe(record)` | Collect evidence without making another write. |
+
+Use `Observation.unknown(...)` for inconclusive evidence. A missing record from
+an eventually consistent endpoint is not enough for `Observation.not_applied(...)`:
+that requires excluding late execution.
+
+Aegentra checks observation identity and payload binding, not the truth of an
+adapter's assertions. [`RefundTool`](src/aegentra/sandbox.py) is a working
+reference. Its provider deliberately omits deduplication so duplicate effects
+remain visible.
+
+<details>
+<summary><strong>Bound recovery without authorizing another write</strong></summary>
+
+Inside an open runtime:
 
 ```python
 from aegentra import RecoveryBudget
@@ -112,168 +217,134 @@ outcome = await runtime.recover(
 )
 ```
 
-Exhaustion returns `Unresolved` and records `recovery_exhausted`. It never clears
-the scope or permits a retry. The deadline is cooperative, not a way to forcibly
-stop blocking adapter code. See [recovery semantics](docs/recovery.md).
+Exhaustion returns `Unresolved` and records `recovery_exhausted`. It neither
+releases the scope nor permits a retry. The deadline is cooperative: it cannot
+forcibly stop blocking adapter code.
 
-Blocked proposals are recorded as `effect_blocked` events on the **blocking**
-operation. Their `blocked_action` field identifies the requested operation, tool,
-and contract version. The rejected payload and approval reference are not copied
-into the event, and no dispatch is reserved for that proposal.
+For a single explicit lookup, use
+`await runtime.reconcile(operation.key, tool=refund_tool)`.
+`runtime.inspect(operation.key)` returns the durable record;
+`runtime.events(operation.key)` returns its ordered history.
 
-```python
-for event in runtime.events(operation.key):
-    if event.blocked_action is not None:
-        proposal = event.blocked_action
-        print(proposal.requested_key.operation_id, proposal.tool_name)
+</details>
+
+## Inspect the decision, not just the exception
+
+Run the restart-and-reconciliation example and retain both databases:
+
+```sh
+uv run python examples/refund_recovery.py --directory ./refund-demo
+uv run aegentra list refund-demo/agent.sqlite3 --knowledge all
+uv run aegentra trace refund-demo/agent.sqlite3 \
+  --tenant shop --account payments --operation-id approved-refund-42
 ```
 
-These decisions survive restart and remain in the history after the original
-operation is reconciled.
+The directory must be new. The recorded event sequence is:
 
-## Operator inspection
+```text
+dispatch_reserved -> observed_unknown -> effect_blocked -> reconciliation_started -> observed_applied
+```
 
-`aegentra list`, `inspect`, and `trace` open read-only snapshots without taking
-the runtime's ownership lock. They can run beside a live writer and do not migrate
-older journals. Lists default to unresolved operations; JSON output includes
-explicit pagination cursors.
+The blocked proposal remains attached to the original operation, including the
+requested operation ID, tool, and contract version, even after reconciliation.
+Its rejected payload and approval reference are not copied into the event.
 
-Arguments and receipts are omitted unless `--include-payload` is supplied.
-Metadata and adapter reasons can still contain sensitive information. Protect
-exports as you would the original journal.
+`list`, `inspect`, and `trace` use read-only snapshots without taking the writer's
+ownership lock or migrating journals. Lists default to unresolved operations.
+JSON output has pagination cursors; the Python `Inspection` API supports a
+consistent snapshot across pages. Arguments and receipts require
+`--include-payload`; metadata and adapter reasons can still be sensitive.
 
-Use `Inspection` for the same capability in Python, including a consistent
-snapshot across multiple pages. See [inspection and CLI details](docs/inspection.md).
+### Operate a controlled worker without silent state loss
 
-## Writing an adapter
+Use `Runtime(path, require_existing=True)` after deliberate journal provisioning.
+Missing or uninitialized state then fails instead of becoming a fresh ledger.
+Read-only diagnostics and full-database inspection archives are available:
 
-An adapter implements four things:
+```sh
+uv run aegentra status refund-demo/agent.sqlite3
+uv run aegentra snapshot refund-demo/agent.sqlite3 \
+  --out refund-demo/incident.sqlite3
+uv run aegentra list refund-demo/incident.sqlite3 --knowledge all
+```
 
-- `name` and `contract_version`: the route and semantics pinned to this operation.
-- `validate(operation)`: reject invalid arguments or an inappropriate declared
-  scope before anything is reserved.
-- `execute(record)`: make one possible write and return an `Observation`.
-- `observe(record)`: collect evidence without making another write.
+Archives preserve committed WAL data, all tenants, and raw payloads; they are
+private, checksummed, and **rejected by writable runtimes**, including older
+versions. They are not safe rollback/failover state. See the
+[embedded-worker runbook](docs/operations.md) for publication failures, monitoring,
+and fail-stop recovery. This remains a research alpha, not a production endorsement.
 
-Use `Observation.unknown(...)` for inconclusive responses. Reserve
-`Observation.not_applied(...)` for evidence that excludes late execution—not a
-missing record from an eventually consistent endpoint.
+## When is this worth integrating?
 
-The runtime checks observation identity and payload binding. It cannot verify
-that an adapter's statement about the provider is truthful. Adapters are trusted
-integration code, not model-generated assertions.
+Consider it when an agent can replan a consequential write, the application can
+assign a stable business-effect scope, and a trusted adapter can investigate the
+original request. The value is enforcing the unresolved-effect boundary outside
+the planner's policy.
 
-See [`RefundTool`](src/aegentra/sandbox.py) for a small working implementation.
-The sandbox deliberately has no provider-side deduplication, so repeated writes
-remain visible rather than hiding a runtime defect.
+Prefer your provider's idempotency and your existing runtime when those already
+cover the failure. This alpha is not a workflow engine, hosted service, generic
+agent-testing platform, or drop-in Stripe integration.
 
-## What this version does not promise
+| Boundary | What this version does not guarantee |
+|---|---|
+| Delivery | Not exactly-once execution. A crash before sending can leave an operation unresolved even if nothing happened. |
+| Authorization | `approval_ref` is an audit reference, not a verified permission token. |
+| Coverage | Undeclared equivalent effects and writes bypassing the boundary are outside the model. |
+| Agent output | The application must gate completion claims; arbitrary model text is not constrained. |
+| Atomicity | The journal and external provider do not share a transaction. |
+| Deployment | One process owns a journal; use local storage, one thread, and one event loop per runtime. |
 
-- **Not exactly-once execution.** A crash before the actual send can leave an
-  operation unresolved even when the provider did nothing.
-- **Not an authorization service.** `approval_ref` is an application-owned audit
-  reference, not a verified permission token.
-- **Not semantic deduplication.** Undeclared equivalent effects and writes that
-  bypass the boundary are outside the model.
-- **Not automatic truthfulness.** The application must gate completion messages;
-  the runtime cannot constrain arbitrary model text.
-- **Not a transaction across systems.** The local journal and external provider
-  do not share a commit.
-- **Not a production payment integration.** The refund provider is a scenario
-  fixture, not a Stripe adapter or a financial correctness claim.
+Await or cancel active work before closing. Exceptions and cancellation propagate;
+a reserved operation remains uncertain afterward. Journal contents are plaintext.
+New database files are owner-only, not encrypted; existing permissions are
+unchanged. Do not put credentials in arguments.
 
-One process owns a journal at a time. Use local storage, one thread, and one event
-loop per runtime. Await or cancel active work before closing. Exceptions and
-cancellation are propagated; a reserved operation remains uncertain afterward.
-Do not interpret an exception as permission to submit a new write.
+## Design and research
 
-The database contains arguments and receipts in plaintext. New files are created
-with owner-only permissions, but this is not encryption. Do not put credentials
-in arguments. Existing file permissions are not changed.
-
-The execution model, crash boundaries, and limits are in
-[`docs/semantics.md`](docs/semantics.md).
-Journals from the initial schema are upgraded transactionally on open; unsupported
-versions still fail explicitly.
-
-## Research direction
-
-The initial question is narrow: **does an agent preserve an unresolved business
-obligation when it replans?**
-
-Durable execution, idempotency, and in-doubt states already exist. Aegentra does
-not claim to have invented them. The planned evaluation separates scope
-enforcement from recovery-policy quality, with existing durable runtimes and
-competent hand-written reconciliation as baselines.
-
-The included laboratory makes a small part of that question executable:
+**Question:** does an agent preserve an unresolved business obligation when it
+replans?
 
 ```sh
 uv run aegentra lab > report.json
 uv run aegentra lab --max-observations 1 > one-lookup.json
 ```
 
-Five fixed scenarios run against an unsafe fresh retry, a competent
-observe-or-stop policy, and Aegentra's effect boundary. Every policy gets the
-same business identity, lookup allowance, and evaluation horizon. Late effects
-continue after a client stops. Rejection, completion, uncertainty, and false
-claims are scored separately.
+The fixed laboratory compares five scenarios under the same business identity,
+lookup allowance, and evaluation horizon. It includes an unsafe retry, a competent
+observe-or-stop policy, and Aegentra. Pending effects continue after a client stops.
 
-The competent baseline matches the boundary on these single-process cases.
-The point is enforcement outside planner policy, not beating a deliberately
-uninformed baseline. This is a deterministic counterexample suite, not an LLM
-benchmark or evidence of universal reliability.
+**The competent baseline matches Aegentra on these single-process cases.**
+The claim is an enforceable boundary, not superior recovery intelligence.
+Durable execution, idempotency, and in-doubt states are established ideas.
+No comparative model result, general performance advantage, or algorithmic
+novelty is claimed.
 
-See the [laboratory contract](docs/laboratory.md) and
-[research decision gates](docs/research.md). There are no published comparative
-model results or established novelty claims.
+| Read next | Contract |
+|---|---|
+| [LangGraph integration](docs/langgraph.md) | Bound operations, JSON outcomes, graph execution, and ownership constraints. |
+| [Execution semantics](docs/semantics.md) | Dispatch reservations, crash boundaries, scope ownership, and schema upgrades. |
+| [Recovery](docs/recovery.md) | Observation budgets, deadlines, and unresolved outcomes. |
+| [Inspection](docs/inspection.md) | Read-only snapshots, event fields, pagination, and exports. |
+| [Operations](docs/operations.md) | Fail-closed startup, diagnostics, inspection archives, storage protection, and recovery. |
+| [Laboratory](docs/laboratory.md) | Controls, independent scoring, and matched comparisons. |
+| [Testing agent](docs/adversarial-testing.md) | Feedback-guided search, shrinking, replay, and limits. |
+| [Research gates](docs/research.md) | Prior art and the evidence needed for stronger claims. |
 
-## Let the testing agent find the failure
-
-```sh
-uv run python examples/adversarial_testing.py --case-out counterexample.json
-```
-
-The agent starts from a benign control, explores mutations using behavioral
-feedback, and checks the provider's actual effects independently. It then shrinks
-the failure and replays the same case against Aegentra.
-
-The default demo finds a lost-acknowledgment counterexample and reduces it to one
-action: replan through another tool. The unsafe client creates two refunds.
-Aegentra blocks the fresh proposal and preserves one refund, still unresolved.
-A separately labeled extended trace adds the evidence needed to confirm success.
-
-Use the JSON CLI for automation:
+## Contributing
 
 ```sh
-# Exit 3 means an invariant violation was found, not a command failure.
-uv run aegentra test-agent --case-out another-case.json > search-report.json
-uv run aegentra replay-test another-case.json --target unsafe_retry
-uv run aegentra replay-test another-case.json --target aegentra
-```
-
-Case files must be new. There is no model, API key, or production provider.
-This bounded search is not a safety proof or an LLM benchmark.
-See the [testing-agent contract](docs/adversarial-testing.md) for budgets,
-invariants, artifact validation, and the meaning of minimality.
-
-## Development
-
-```sh
-uv sync --locked
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy
+uv sync --locked --extra langgraph
+uv run --extra langgraph pytest
+uv run --extra langgraph ruff check .
+uv run --extra langgraph ruff format --check .
+uv run --extra langgraph mypy
 uv build
 ```
 
-Behavioral cases include lost acknowledgments, delayed commits, new-ID and
-alternate-tool replanning, cancellation, and abrupt subprocess exit on both
-sides of the provider commit.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) before changing dispatch or finality rules.
-
-## License
+Cases cover lost acknowledgments, delayed commits, alternate-tool replanning,
+cancellation, and abrupt subprocess exit on both sides of the provider commit.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing dispatch or finality rules.
+An independently reproducible failure or a well-scoped adapter is more useful
+than a broader reliability claim.
 
 Licensed under [Apache 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
