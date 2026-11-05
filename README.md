@@ -147,6 +147,11 @@ Checkpoint-resume coverage also recreates the graph after reopening the runtime:
 the replayed tool reconciles its original reservation without another refund.
 The application must preserve both its graph checkpoint and live journal.
 
+For graphs that should only check an existing operation, `recovery_tool` binds
+its key and an application-owned recovery budget without exposing dispatch.
+It never creates an intent or calls `execute`; exhausted evidence gathering
+remains `unresolved`. See the [read-only recovery binding](docs/langgraph.md#expose-recovery-without-dispatch-authority).
+
 ## Put a boundary around a write
 
 Create the operation in trusted application code, after authorizing its payload:

@@ -13,16 +13,37 @@ from aegentra.models import (
     ConfirmedApplied,
     ConfirmedNotApplied,
     Operation,
+    OperationKey,
+    Outcome,
     Unresolved,
+    _nonempty,
     decode_arguments,
     encode_arguments,
 )
+from aegentra.recovery import RecoveryBudget
 from aegentra.runtime import Runtime
 from aegentra.tool import Tool
 
 
 class _NoArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+def _outcome_json(operation_id: str, outcome: Outcome) -> str:
+    result = {"operation_id": operation_id}
+    match outcome:
+        case ConfirmedApplied():
+            result["status"] = "confirmed_applied"
+        case ConfirmedNotApplied():
+            result["status"] = "confirmed_not_applied"
+        case Unresolved():
+            result["status"] = "unresolved"
+        case BlockedByUnresolvedEffect():
+            result["status"] = "blocked_by_unresolved_effect"
+            result["blocking_operation_id"] = outcome.blocking_operation.key.operation_id
+        case unexpected:
+            assert_never(unexpected)
+    return json.dumps(result, sort_keys=True)
 
 
 def operation_tool(
@@ -48,24 +69,41 @@ def operation_tool(
         # LangChain bypasses Pydantic validation for models with zero fields.
         _NoArguments.model_validate(arguments)
         outcome = await runtime.perform(approved, tool=adapter)
-        result = {"operation_id": approved.operation_id}
-        match outcome:
-            case ConfirmedApplied():
-                result["status"] = "confirmed_applied"
-            case ConfirmedNotApplied():
-                result["status"] = "confirmed_not_applied"
-            case Unresolved():
-                result["status"] = "unresolved"
-            case BlockedByUnresolvedEffect():
-                result["status"] = "blocked_by_unresolved_effect"
-                result["blocking_operation_id"] = outcome.blocking_operation.key.operation_id
-            case unexpected:
-                assert_never(unexpected)
-        return json.dumps(result, sort_keys=True)
+        return _outcome_json(approved.operation_id, outcome)
 
     return StructuredTool.from_function(
         coroutine=perform,
         name=adapter.name,
+        description=description,
+        args_schema=_NoArguments.model_json_schema(),
+    )
+
+
+def recovery_tool(
+    runtime: Runtime,
+    key: OperationKey,
+    *,
+    adapter: Tool,
+    budget: RecoveryBudget,
+    name: str,
+    description: str,
+) -> StructuredTool:
+    """Expose bounded observation of an existing operation, never reservation or dispatch."""
+    if not isinstance(key, OperationKey):
+        raise TypeError("key must be an OperationKey.")
+    if not isinstance(budget, RecoveryBudget):
+        raise TypeError("budget must be a RecoveryBudget.")
+    _nonempty(name, "name")
+    _nonempty(description, "description")
+
+    async def recover(**arguments: object) -> str:
+        _NoArguments.model_validate(arguments)
+        outcome = await runtime.recover(key, tool=adapter, budget=budget)
+        return _outcome_json(key.operation_id, outcome)
+
+    return StructuredTool.from_function(
+        coroutine=recover,
+        name=name,
         description=description,
         args_schema=_NoArguments.model_json_schema(),
     )

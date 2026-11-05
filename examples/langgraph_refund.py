@@ -10,8 +10,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from aegentra import EffectScope, Operation, Runtime
-from aegentra.integrations.langgraph import operation_tool
+from aegentra import EffectScope, Operation, RecoveryBudget, Runtime
+from aegentra.integrations.langgraph import operation_tool, recovery_tool
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
 
 
@@ -83,14 +83,28 @@ async def demonstrate(directory: Path) -> None:
             raise RuntimeError("The LangGraph trace did not preserve the unresolved boundary.")
 
     with Runtime(path) as restarted:
-        recover = operation_tool(
-            restarted, operation, adapter=adapter, description="Reconcile the approved refund."
+        recover = recovery_tool(
+            restarted,
+            operation.key,
+            adapter=adapter,
+            budget=RecoveryBudget(max_observations=2, timeout_seconds=5.0),
+            name="check_refund_status",
+            description="Check the original refund without submitting another request.",
         )
         recovery = StateGraph(MessagesState)
         recovery.add_node("tools", ToolNode([recover], handle_tool_errors=False))
         recovery.add_edge(START, "tools")
         recovery.add_edge("tools", END)
-        result = await recovery.compile().ainvoke(primary_request({"messages": []}))
+        result = await recovery.compile().ainvoke(
+            {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        tool_calls=[{"id": "recover", "name": recover.name, "args": {}}],
+                    )
+                ]
+            }
+        )
         message = result["messages"][-1]
         if not isinstance(message.content, str):
             raise TypeError("Expected a JSON tool response.")

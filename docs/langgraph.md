@@ -22,7 +22,7 @@ does not import LangGraph, LangChain, or Pydantic.
 The example runs a compiled graph with scripted tool choices and a sandbox
 provider, not an LLM or external payment API. The provider creates one refund
 but loses the acknowledgment. An alternate route is blocked. After the runtime
-reopens, the original tool reconciles without another write.
+reopens, a recovery-only tool checks the original operation without another write.
 
 ## Bind an operation, not a model-controlled authorization request
 
@@ -90,6 +90,44 @@ outcome, not the framework status or the model's completion text.
 Repeated invocation of the same bound operation follows normal Aegentra rules:
 read-only reconciliation or a settled result, never another dispatch. A settled
 scope is not a permanent ban on independently authorized future operations.
+
+## Expose recovery without dispatch authority
+
+When a graph should only inspect a previously reserved operation, bind
+`recovery_tool` instead of `operation_tool`:
+
+```python
+from aegentra import RecoveryBudget
+from aegentra.integrations.langgraph import recovery_tool
+
+check = recovery_tool(
+    runtime,
+    operation.key,
+    adapter=adapter,
+    budget=RecoveryBudget(max_observations=3, timeout_seconds=5.0, interval_seconds=0.25),
+    name="check_refund_status",
+    description="Check the original refund without submitting another request.",
+)
+tools = ToolNode([check], handle_tool_errors=False)
+```
+
+Its strict input is `{}`. The application binds the full operation key, adapter,
+and recovery budget; the model cannot override them. Invocation calls
+`Runtime.recover`, never reservation, dispatch validation, or `adapter.execute`.
+The original adapter name and contract version must still match. As always,
+`adapter.observe` must itself be read-only.
+
+An unrecorded key raises `OperationNotFound`; it is not implicitly authorized or
+created. Settled operations return their recorded result without another lookup.
+Unresolved operations use at most the configured observations per invocation.
+Budget exhaustion returns `unresolved`, records `recovery_exhausted`, and leaves
+the business scope blocked. Deadlines are cooperative, not protection against
+blocking adapters. Provider errors propagate.
+
+The JSON response uses the same operation ID, status, and redaction rules above.
+Only `confirmed_applied`, `confirmed_not_applied`, and `unresolved` can result
+from recovery. This is a per-call budget, not a graph-wide rate or cost limit:
+applications must separately bound how often the model can request recovery.
 
 ## Ownership and errors
 

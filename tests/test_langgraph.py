@@ -5,7 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from aegentra import Knowledge, Observation, Operation, OperationRecord, Runtime, RuntimeUsageError
+from aegentra import (
+    AdapterMismatch,
+    Knowledge,
+    Observation,
+    Operation,
+    OperationNotFound,
+    OperationRecord,
+    RecoveryBudget,
+    Runtime,
+    RuntimeUsageError,
+)
 from aegentra.sandbox import RefundLedger, RefundTool, Scenario
 
 prebuilt = pytest.importorskip("langgraph.prebuilt")
@@ -70,6 +80,203 @@ async def test_real_tool_node_blocks_alternate_intent_and_reconciles_after_resta
             "operation_id": operation.operation_id,
         }
     assert len(ledger.refunds()) == 1
+
+
+async def test_recovery_tool_only_observes_and_reuses_the_original_operation(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+):
+    observations = []
+
+    class ReadOnlyAdapter(RefundTool):
+        def validate(self, operation: Operation) -> None:
+            raise AssertionError("Recovery must not validate a new dispatch.")
+
+        async def execute(self, record: OperationRecord) -> Observation:
+            raise AssertionError("Recovery must never dispatch.")
+
+        async def observe(self, record: OperationRecord) -> Observation:
+            observations.append(record.key)
+            if len(observations) == 1:
+                return Observation.unknown(record, reason="Receipt is not visible yet.")
+            return self.ledger.observe(record)
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT))
+        tool = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=ReadOnlyAdapter(ledger),
+            budget=RecoveryBudget(max_observations=2),
+            name="check_refund",
+            description="Check the original refund without writing again.",
+        )
+        assert await invoke(tool) == {
+            "status": "confirmed_applied",
+            "operation_id": operation.operation_id,
+        }
+        assert observations == [operation.key, operation.key]
+        assert (await invoke(tool))["status"] == "confirmed_applied"
+        assert len(observations) == 2
+        assert len(ledger.refunds()) == 1
+
+
+async def test_recovery_tool_exhaustion_preserves_unknown_and_scope_blocking(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+):
+    observations = []
+
+    class Inconclusive(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            observations.append(record.key)
+            return Observation.unknown(record, reason="No final evidence.")
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
+        tool = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=Inconclusive(ledger),
+            budget=RecoveryBudget(max_observations=2),
+            name="check_refund",
+            description="Check.",
+        )
+        assert await invoke(tool) == {
+            "status": "unresolved",
+            "operation_id": operation.operation_id,
+        }
+        assert len(observations) == 2
+        assert runtime.events(operation.key)[-1].kind == "recovery_exhausted"
+        alternate = integration.operation_tool(
+            runtime,
+            replace(operation, operation_id="alternate"),
+            adapter=RefundTool(ledger, name="refund_order"),
+            description="Refund.",
+        )
+        assert (await invoke(alternate))["status"] == "blocked_by_unresolved_effect"
+        assert len(ledger.refunds()) == 1
+
+
+async def test_recovery_tool_missing_operation_does_not_reserve_or_dispatch(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+):
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        tool = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=RefundTool(ledger),
+            budget=RecoveryBudget(),
+            name="check_refund",
+            description="Check.",
+        )
+        with pytest.raises(OperationNotFound):
+            await invoke(tool)
+        assert ledger.refunds() == ()
+        with pytest.raises(OperationNotFound):
+            runtime.inspect(operation.key)
+
+
+@pytest.mark.parametrize("error", ["adapter", "provider", "closed"])
+async def test_recovery_tool_propagates_unexpected_errors(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger, error
+):
+    class BrokenLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise TimeoutError("Provider lookup failed.")
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT))
+        adapter = (
+            RefundTool(ledger, name="refund_order") if error == "adapter" else BrokenLookup(ledger)
+        )
+        tool = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=adapter,
+            budget=RecoveryBudget(),
+            name="check_refund",
+            description="Check.",
+        )
+        expected = AdapterMismatch if error == "adapter" else TimeoutError
+        if error == "closed":
+            runtime.close()
+            expected = RuntimeUsageError
+        with pytest.raises(expected):
+            await invoke(tool)
+    assert len(ledger.refunds()) == 1
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"operation_id": "invented"},
+        {"max_observations": 1000},
+        {"timeout_seconds": 1000},
+    ],
+)
+async def test_recovery_tool_does_not_expose_identity_or_budget_to_the_model(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger, arguments
+):
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.UNOBSERVABLE))
+        before = runtime.events(operation.key)
+        tool = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=RefundTool(ledger),
+            budget=RecoveryBudget(),
+            name="check_refund",
+            description="Check.",
+        )
+        schema = function_calling.convert_to_openai_tool(tool)["function"]["parameters"]
+        assert schema["properties"] == {}
+        assert schema["additionalProperties"] is False
+        with pytest.raises(tool_nodes.ToolInvocationError) as error:
+            await invoke(tool, arguments)
+        assert isinstance(error.value.__cause__, pydantic.ValidationError)
+        assert runtime.events(operation.key) == before
+
+
+@pytest.mark.parametrize("mode", ["cancel", "deadline"])
+async def test_recovery_tool_interruption_does_not_dispatch_or_leave_recovery_active(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger, mode
+):
+    entered = asyncio.Event()
+
+    class WaitingLookup(RefundTool):
+        async def observe(self, record: OperationRecord) -> Observation:
+            entered.set()
+            await asyncio.Event().wait()
+            raise AssertionError("The lookup should have been interrupted.")
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT))
+        tool = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=WaitingLookup(ledger),
+            budget=RecoveryBudget(timeout_seconds=0.05 if mode == "deadline" else None),
+            name="check_refund",
+            description="Check.",
+        )
+        task = asyncio.create_task(invoke(tool))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        if mode == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            assert (await asyncio.wait_for(task, timeout=5))["status"] == "unresolved"
+            assert runtime.events(operation.key)[-1].kind == "recovery_exhausted"
+        resumed = integration.recovery_tool(
+            runtime,
+            operation.key,
+            adapter=RefundTool(ledger),
+            budget=RecoveryBudget(),
+            name="check_refund",
+            description="Check.",
+        )
+        assert (await invoke(resumed))["status"] == "confirmed_applied"
+        assert len(ledger.refunds()) == 1
 
 
 @pytest.mark.parametrize(
