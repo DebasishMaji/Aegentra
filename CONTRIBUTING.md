@@ -34,6 +34,9 @@ reject the input instead. Keep credentials out of arguments, receipts, fixtures,
 and screenshots.
 
 Read-only inspection must stay read-only, including for legacy journals.
+Never open and close an existing database file outside SQLite: POSIX close can
+release other connections' locks in the same process. Provision only a closed
+private file, and preserve the child-process lock-retention regression.
 Arguments and receipts must remain opt-in in exported traces. Exercise the
 installed wheel as well as the editable checkout when changing packaging or CLI
 entry points.

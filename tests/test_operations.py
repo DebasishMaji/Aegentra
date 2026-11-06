@@ -35,6 +35,105 @@ def cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def assert_sqlite_main_lock_held(path: Path) -> None:
+    """Probe SQLite's shared-lock range from a child, leaving this process's locks alone."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import fcntl
+import os
+import sys
+
+descriptor = os.open(sys.argv[1], os.O_RDWR)
+try:
+    try:
+        fcntl.lockf(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB, 1, 0x40000002)
+    except BlockingIOError:
+        print("held")
+    else:
+        print("released")
+finally:
+    os.close(descriptor)
+""",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.strip() == "held"
+
+
+@pytest.mark.parametrize("require_existing", [False, True])
+def test_runtime_startup_preserves_an_existing_inspections_sqlite_lock(
+    tmp_path: Path, require_existing: bool
+) -> None:
+    path = tmp_path / "live.db"
+    with Runtime(path):
+        pass
+    with Inspection(path) as reader:
+        before = reader.status()
+        assert_sqlite_main_lock_held(path)
+        with Runtime(path, require_existing=require_existing):
+            assert_sqlite_main_lock_held(path)
+        assert_sqlite_main_lock_held(path)
+        assert reader.status() == before
+
+
+def test_provisioning_never_overwrites_a_concurrent_winner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "live.db"
+
+    def race(source: Path, target: Path) -> None:
+        target.write_bytes(b"another provisioner's file")
+        raise FileExistsError("Another provisioner won.")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", race)
+        with pytest.raises(sqlite3.DatabaseError):
+            Runtime(path)
+    assert path.read_bytes() == b"another provisioner's file"
+    assert not list(tmp_path.glob(".aegentra-provision-*"))
+
+
+def test_failed_provisioning_cleans_temporary_files_and_releases_the_owner_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "live.db"
+
+    def fail(source: Path, target: Path) -> None:
+        raise OSError("Injected provisioning failure.")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", fail)
+        with pytest.raises(OSError, match="Injected provisioning"):
+            Runtime(path)
+    assert not path.exists()
+    assert not list(tmp_path.glob(".aegentra-provision-*"))
+    with Runtime(path):
+        pass
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="Root can write files without write mode bits.")
+def test_runtime_still_rejects_a_filesystem_read_only_database(tmp_path: Path) -> None:
+    path = tmp_path / "live.db"
+    with Runtime(path):
+        pass
+    path.chmod(0o400)
+    try:
+        with pytest.raises(PermissionError):
+            Runtime(path, require_existing=True)
+    finally:
+        path.chmod(0o600)
+    with Runtime(path, require_existing=True):
+        pass
+
+
 async def test_snapshot_preserves_all_tenants_payloads_and_the_pinned_view(
     tmp_path: Path, operation: Operation, ledger: RefundLedger
 ) -> None:

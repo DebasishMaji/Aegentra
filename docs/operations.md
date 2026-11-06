@@ -28,6 +28,20 @@ journal, or establish that the file contains all prior provider effects.
 Do not implement a fallback that creates a new file, chooses a fresh namespace,
 or invents new operation IDs after an open/recovery error.
 
+Existing database files are opened only through SQLite. Opening and closing a
+raw descriptor, even just to check permissions, can release another connection's
+process-wide POSIX locks; see [SQLite's locking caveat, section 2.2](https://www.sqlite.org/howtocorrupt.html).
+Do not independently open/read/close a live database in the same process.
+Use `Inspection` and the snapshot API for diagnostics and captures.
+
+Deliberate first-time provisioning creates a private `0600` empty file in the
+same directory, closes its descriptor, and publishes it with an exclusive hard
+link. The temporary name is removed before SQLite connects. A concurrent
+provisioner's file is never overwritten and still undergoes normal format
+validation. Existing permissions are preserved; writable startup rejects files
+without effective-user read/write access. Provisioning installs an empty file,
+not an initialized schema, a recovery copy, or proof of a journal's identity.
+
 One runtime owns a journal, in one process, thread, and event loop. Await or
 cancel its active operations before closing it. Offloaded operator work must
 construct its own `Inspection` in the receiving thread, not share an existing
@@ -35,7 +49,8 @@ connection. Ownership locks are advisory; do not remove the retained `.lock`
 file or let other applications mutate the database.
 
 Use a trusted local filesystem with SQLite WAL support, reliable synchronization,
-and hard-link/directory-sync support for snapshot publication. Do not deploy on
+hard-link support for first-time provisioning and snapshots, and directory-sync
+support for snapshot publication. Do not deploy on
 a network share, synchronize live files with a file-sync agent, or swap database
 files underneath open connections. WAL activation is checked, but that cannot
 prove the hardware honors durable writes.

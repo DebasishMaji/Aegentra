@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import sqlite3
+import tempfile
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
@@ -98,6 +100,28 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _provision(path: Path, *, require_existing: bool) -> None:
+    # Opening and closing an existing file outside SQLite can drop another connection's locks.
+    try:
+        path.stat()
+    except FileNotFoundError:
+        if require_existing:
+            raise
+        descriptor, name = tempfile.mkstemp(prefix=".aegentra-provision-", dir=path.parent)
+        temporary = Path(name)
+        try:
+            os.close(descriptor)
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                # A concurrent provisioner won; SQLite will validate its file without replacing it.
+                pass
+        finally:
+            temporary.unlink()
+    if not os.access(path, os.R_OK | os.W_OK, effective_ids=True):
+        raise PermissionError(errno.EACCES, "Read/write database access is required.", path)
+
+
 class Journal:
     def __init__(self, path: Path, *, require_existing: bool = False) -> None:
         if not isinstance(require_existing, bool):
@@ -114,8 +138,7 @@ class Journal:
 
             # Keep the lock inode: unlinking it lets a third process lock a different file.
             resources.callback(fcntl.flock, lock_fd, fcntl.LOCK_UN)
-            db_fd = os.open(self.path, os.O_RDWR | (0 if require_existing else os.O_CREAT), 0o600)
-            os.close(db_fd)
+            _provision(self.path, require_existing=require_existing)
             self._db = sqlite3.connect(
                 f"{self.path.as_uri()}?mode=rw", uri=True, isolation_level=None
             )
