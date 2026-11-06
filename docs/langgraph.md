@@ -22,7 +22,8 @@ does not import LangGraph, LangChain, or Pydantic.
 The example runs a compiled graph with scripted tool choices and a sandbox
 provider, not an LLM or external payment API. The provider creates one refund
 but loses the acknowledgment. An alternate route is blocked. After the runtime
-reopens, a recovery-only tool checks the original operation without another write.
+reopens, it locates the original operation by business scope and binds its key
+to a recovery-only tool, without proposing another write.
 
 ## Bind an operation, not a model-controlled authorization request
 

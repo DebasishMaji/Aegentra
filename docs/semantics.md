@@ -111,6 +111,36 @@ When reconciliation settles the original operation, the recorded proposals remai
 in its history. They are not automatically executed afterward. Cross-tenant or
 unrelated-scope operations do not produce blocked events on this operation.
 
+## Locate an unresolved operation by scope
+
+If a caller retained the business scope but lost the operation ID, it need not
+propose a new write just to discover the blocker:
+
+```python
+from aegentra import EffectScope
+
+scope = EffectScope("tenant-a", "payments", "order-42", "refund")
+pending = runtime.find_unresolved(scope)
+if pending is not None:
+    outcome = await runtime.reconcile(pending.key, tool=refund_tool)
+```
+
+The read matches every scope field and returns the one `UNKNOWN` operation, or
+`None` if no unresolved holder exists. It includes reserved and reconciling
+operations as well as the unresolved phase. It neither reserves nor validates
+a dispatch, observes the provider, nor changes records or audit history.
+Reconciliation still requires the original adapter name and contract version.
+
+This is a point-in-time lookup, not authorization or permanent deduplication.
+`None` does not establish that the business effect never happened: settled
+operations remain in history but are not returned. Every proposed write must
+still pass `perform`'s transactional boundary and application authorization.
+Scope selection remains trusted configuration, not tenant-level access control.
+
+`Inspection.find_unresolved` performs the same query in its pinned audit view,
+including on legacy journals. Refresh that reader before interpreting later
+writer changes; historical inspection cannot authorize a new effect.
+
 ## Crash boundaries
 
 | Interruption | Recovery |

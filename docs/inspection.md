@@ -22,6 +22,18 @@ committing in WAL mode, but those new commits do not appear inside an existing
 reader. Reopen to refresh. Keep inspection contexts short: long-lived snapshots
 can prevent SQLite from reclaiming old WAL pages.
 
+`reader.find_unresolved(scope)` finds the operation holding an exact
+`EffectScope(tenant, account, resource, effect)`, or returns `None` if this view
+contains no unresolved holder. It requires all four fields, does not call an
+adapter, and does not append a blocked-proposal event. Reserved, reconciling,
+and unresolved phases are included; settled history is excluded.
+
+Like other inspection reads, this result is pinned until the reader closes.
+A previously unresolved record can remain visible after a live runtime settles
+it. Inspection snapshots provide historical audit, not current authority.
+The live owner can use `Runtime.find_unresolved(scope)` to locate the original
+key before reconciliation; see [scope-based recovery](semantics.md#locate-an-unresolved-operation-by-scope).
+
 `reader.export_trace(key)` returns a versioned JSON-compatible object with the
 operation, an event page, and its continuation sequence. Arguments and receipts
 are omitted unless `include_payload=True`. Metadata, approval references and

@@ -228,6 +228,10 @@ forcibly stop blocking adapter code.
 
 For a single explicit lookup, use
 `await runtime.reconcile(operation.key, tool=refund_tool)`.
+If the operation ID was lost but its exact business scope is known,
+`runtime.find_unresolved(scope)` locates the original key without proposing a
+write. No match is not proof that the effect never happened. See
+[scope-based recovery](docs/semantics.md#locate-an-unresolved-operation-by-scope).
 `runtime.inspect(operation.key)` returns the durable record;
 `runtime.events(operation.key)` returns its ordered history.
 

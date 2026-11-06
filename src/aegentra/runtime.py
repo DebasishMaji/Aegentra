@@ -15,6 +15,7 @@ from .models import (
     BlockedByUnresolvedEffect,
     ConfirmedApplied,
     ConfirmedNotApplied,
+    EffectScope,
     JournalEvent,
     Knowledge,
     Operation,
@@ -173,6 +174,11 @@ class Runtime:
     def inspect(self, key: OperationKey) -> OperationRecord:
         self._check_owner()
         return self._journal.get(key)
+
+    def find_unresolved(self, scope: EffectScope) -> OperationRecord | None:
+        """Find the operation holding this exact scope without reserving or observing."""
+        self._check_owner()
+        return self._journal.find_unresolved(scope)
 
     def events(self, key: OperationKey) -> tuple[JournalEvent, ...]:
         self._check_owner()

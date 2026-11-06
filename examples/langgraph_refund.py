@@ -39,9 +39,10 @@ def alternate_request(state: MessagesState) -> MessagesState:
 
 async def demonstrate(directory: Path) -> None:
     ledger = RefundLedger(directory / "provider.sqlite3")
+    scope = EffectScope("shop", "payments", "order-42", "refund")
     operation = Operation(
         "approved-refund-42",
-        EffectScope("shop", "payments", "order-42", "refund"),
+        scope,
         "approval-42",
         {"amount_minor": 5000, "currency": "USD"},
     )
@@ -83,9 +84,12 @@ async def demonstrate(directory: Path) -> None:
             raise RuntimeError("The LangGraph trace did not preserve the unresolved boundary.")
 
     with Runtime(path) as restarted:
+        pending = restarted.find_unresolved(scope)
+        if pending is None:
+            raise RuntimeError("The original unresolved refund was not found.")
         recover = recovery_tool(
             restarted,
-            operation.key,
+            pending.key,
             adapter=adapter,
             budget=RecoveryBudget(max_observations=2, timeout_seconds=5.0),
             name="check_refund_status",

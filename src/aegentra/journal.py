@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ._format import read_format
-from ._read import decode_record, get_events, get_record, key_values
+from ._read import decode_record, find_unresolved_record, get_events, get_record, key_values
 from .errors import (
     AdapterMismatch,
     EvidenceMismatch,
@@ -22,6 +22,7 @@ from .errors import (
 from .models import (
     BlockedAction,
     BlockedByUnresolvedEffect,
+    EffectScope,
     JournalEvent,
     Knowledge,
     Observation,
@@ -170,6 +171,9 @@ class Journal:
     def get(self, key: OperationKey) -> OperationRecord:
         return get_record(self._db, key)
 
+    def find_unresolved(self, scope: EffectScope) -> OperationRecord | None:
+        return find_unresolved_record(self._db, scope)
+
     def reserve(
         self, operation: Operation, payload: str, tool_name: str, contract_version: str
     ) -> tuple[OperationRecord, bool] | BlockedByUnresolvedEffect:
@@ -193,14 +197,8 @@ class Journal:
                 return record, False
 
             scope = operation.scope
-            blocker = self._db.execute(
-                """SELECT * FROM operations
-                   WHERE tenant = ? AND account = ? AND resource = ? AND effect = ?
-                     AND knowledge = 'unknown'""",
-                (scope.tenant, scope.account, scope.resource, scope.effect),
-            ).fetchone()
-            if blocker is not None:
-                blocking_operation = decode_record(blocker)
+            blocking_operation = self.find_unresolved(scope)
+            if blocking_operation is not None:
                 self._event(
                     blocking_operation.key,
                     "effect_blocked",

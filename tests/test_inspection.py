@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from aegentra import (
+    EffectScope,
     Inspection,
     JournalVersionError,
     Knowledge,
@@ -28,12 +29,15 @@ async def test_inspection_coexists_with_writer_and_keeps_a_stable_snapshot(
         with Inspection(path) as reader:
             original = reader.inspect(operation.key)
             events = reader.events(operation.key)
+            assert reader.find_unresolved(operation.scope) == original
             await runtime.reconcile(operation.key, tool=tool)
             assert reader.inspect(operation.key) == original
+            assert reader.find_unresolved(operation.scope) == original
             assert reader.events(operation.key) == events
             assert original.knowledge is Knowledge.UNKNOWN
         with Inspection(path) as fresh:
             assert fresh.inspect(operation.key).knowledge is Knowledge.APPLIED
+            assert fresh.find_unresolved(operation.scope) is None
 
 
 def test_missing_journal_is_not_created(tmp_path: Path) -> None:
@@ -64,6 +68,7 @@ async def test_schema_one_is_read_without_migration(
     with Inspection(legacy_journal) as reader:
         assert reader.schema_version == 1
         assert reader.inspect(operation.key) == original
+        assert reader.find_unresolved(operation.scope) == original
         assert reader.events(operation.key).events == events
     assert await asyncio.to_thread(legacy_journal.read_bytes) == before
     with sqlite3.connect(legacy_journal) as db:
@@ -187,3 +192,16 @@ def test_missing_operation_does_not_return_an_empty_success(tmp_path: Path) -> N
     with Inspection(path) as reader:
         with pytest.raises(OperationNotFound):
             reader.export_trace(OperationKey("t", "a", "absent"))
+
+
+def test_scope_lookup_in_inspection_rejects_untyped_scopes_and_closed_reader(tmp_path: Path):
+    path = tmp_path / "agent.sqlite3"
+    with Runtime(path):
+        pass
+    scope = EffectScope("t", "a", "resource", "effect")
+    with Inspection(path) as reader:
+        assert reader.find_unresolved(scope) is None
+        with pytest.raises(TypeError, match="EffectScope"):
+            reader.find_unresolved("resource")
+    with pytest.raises(RuntimeUsageError, match="closed"):
+        reader.find_unresolved(scope)

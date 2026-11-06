@@ -53,6 +53,110 @@ async def test_restart_reconciles_lost_acknowledgment(
     assert len(ledger.refunds()) == 1
 
 
+async def test_find_unresolved_recovers_the_original_key_after_restart(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    path = tmp_path / "agent.sqlite3"
+    tool = RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+    with Runtime(path) as runtime:
+        await runtime.perform(operation, tool=tool)
+        original = runtime.inspect(operation.key)
+        history = runtime.events(operation.key)
+    with Runtime(path, require_existing=True) as restarted:
+        found = restarted.find_unresolved(operation.scope)
+        assert found == original
+        assert restarted.events(operation.key) == history
+        assert isinstance(await restarted.reconcile(found.key, tool=tool), ConfirmedApplied)
+        assert restarted.find_unresolved(operation.scope) is None
+        assert restarted.inspect(operation.key).knowledge is Knowledge.APPLIED
+    assert len(ledger.refunds()) == 1
+
+
+@pytest.mark.parametrize("different", ["tenant", "account", "resource", "effect"])
+async def test_find_unresolved_matches_every_scope_dimension(
+    tmp_path: Path, operation: Operation, different: str
+) -> None:
+    class UnknownTool:
+        name = "declared-test-tool"
+        contract_version = "1"
+
+        def validate(self, candidate: Operation) -> None:
+            pass
+
+        async def execute(self, record: OperationRecord) -> Observation:
+            return Observation.unknown(record, reason="No final evidence.")
+
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise AssertionError("A scope lookup must not observe the provider.")
+
+    other = replace(
+        operation,
+        operation_id="other",
+        scope=replace(operation.scope, **{different: "another' OR 1=1 --"}),
+    )
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=UnknownTool())
+        assert runtime.find_unresolved(other.scope) is None
+        await runtime.perform(other, tool=UnknownTool())
+        before = runtime.events(operation.key), runtime.events(other.key)
+        assert runtime.find_unresolved(operation.scope).key == operation.key
+        assert runtime.find_unresolved(other.scope).key == other.key
+        assert (runtime.events(operation.key), runtime.events(other.key)) == before
+
+
+@pytest.mark.parametrize("scenario", [Scenario.ACKNOWLEDGED, Scenario.REJECTED])
+async def test_find_unresolved_does_not_return_settled_history(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger, scenario: Scenario
+) -> None:
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        await runtime.perform(operation, tool=RefundTool(ledger, scenario))
+        assert runtime.find_unresolved(operation.scope) is None
+        assert runtime.inspect(operation.key).phase is Phase.SETTLED
+
+
+async def test_find_unresolved_includes_a_still_active_reservation(
+    tmp_path: Path, operation: Operation
+) -> None:
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    class WaitingTool:
+        name = "waiting"
+        contract_version = "1"
+
+        def validate(self, candidate: Operation) -> None:
+            pass
+
+        async def execute(self, record: OperationRecord) -> Observation:
+            entered.set()
+            await finish.wait()
+            return Observation.unknown(record, reason="Still inconclusive.")
+
+        async def observe(self, record: OperationRecord) -> Observation:
+            raise AssertionError("A scope lookup must not observe.")
+
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        task = asyncio.create_task(runtime.perform(operation, tool=WaitingTool()))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            found = runtime.find_unresolved(operation.scope)
+            assert found.key == operation.key
+            assert found.phase is Phase.RESERVED
+        finally:
+            finish.set()
+            await asyncio.wait_for(task, timeout=5)
+        assert runtime.find_unresolved(operation.scope).phase is Phase.UNRESOLVED
+
+
+def test_find_unresolved_rejects_untyped_scopes_and_closed_runtime(tmp_path: Path) -> None:
+    scope = EffectScope("tenant", "account", "resource", "effect")
+    with Runtime(tmp_path / "agent.sqlite3") as runtime:
+        assert runtime.find_unresolved(scope) is None
+        with pytest.raises(TypeError, match="EffectScope"):
+            runtime.find_unresolved(("tenant", "account", "resource", "effect"))
+    with pytest.raises(RuntimeUsageError, match="closed"):
+        runtime.find_unresolved(scope)
+
+
 async def test_new_operation_and_alternate_tool_cannot_bypass_unresolved_scope(
     tmp_path: Path, operation: Operation, ledger: RefundLedger
 ) -> None:

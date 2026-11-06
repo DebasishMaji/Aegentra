@@ -47,6 +47,18 @@ def get_record(db: sqlite3.Connection, key: OperationKey) -> OperationRecord:
     return decode_record(row)
 
 
+def find_unresolved_record(db: sqlite3.Connection, scope: EffectScope) -> OperationRecord | None:
+    if not isinstance(scope, EffectScope):
+        raise TypeError("scope must be an EffectScope.")
+    row = db.execute(
+        """SELECT * FROM operations
+           WHERE tenant = ? AND account = ? AND resource = ? AND effect = ?
+             AND knowledge = 'unknown'""",
+        (scope.tenant, scope.account, scope.resource, scope.effect),
+    ).fetchone()
+    return decode_record(row) if row is not None else None
+
+
 def get_events(
     db: sqlite3.Connection,
     key: OperationKey,

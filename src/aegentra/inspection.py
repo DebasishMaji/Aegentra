@@ -11,10 +11,11 @@ from types import TracebackType
 from typing import Self
 
 from ._format import read_format
-from ._read import decode_record, get_events, get_record, key_values
+from ._read import decode_record, find_unresolved_record, get_events, get_record, key_values
 from ._serialization import event_dict, record_dict
 from .errors import RuntimeUsageError, SnapshotUsageError
 from .models import (
+    EffectScope,
     EventPage,
     JSONValue,
     Knowledge,
@@ -82,6 +83,11 @@ class Inspection:
     def inspect(self, key: OperationKey) -> OperationRecord:
         self._check_owner()
         return get_record(self._db, key)
+
+    def find_unresolved(self, scope: EffectScope) -> OperationRecord | None:
+        """Audit the operation holding this scope in the inspection's pinned view."""
+        self._check_owner()
+        return find_unresolved_record(self._db, scope)
 
     def snapshot(
         self, destination: str | Path, *, timeout_seconds: float = 30.0
