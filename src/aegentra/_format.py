@@ -1,14 +1,25 @@
 """Recognize supported journals before reads, migrations, or dispatch."""
 
 import sqlite3
+import stat
+from pathlib import Path
 
-from .errors import JournalVersionError, SnapshotUsageError
+from .errors import JournalVersionError, RuntimeUsageError, SnapshotUsageError
 from .snapshot import (
     SNAPSHOT_APPLICATION_ID,
     SNAPSHOT_VERSION,
     SnapshotInfo,
     read_snapshot_info,
 )
+
+
+def check_database_path(path: Path) -> None:
+    try:
+        metadata = path.stat()
+    except FileNotFoundError as exc:
+        raise sqlite3.OperationalError(f"unable to open database file: {path}") from exc
+    if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink > 1:
+        raise RuntimeUsageError(f"SQLite database files must not have hard-link aliases: {path}")
 
 
 def read_format(

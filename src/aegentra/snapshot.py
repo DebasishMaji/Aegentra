@@ -15,7 +15,7 @@ from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
-from .errors import JournalVersionError, SnapshotUsageError
+from .errors import JournalVersionError, RuntimeUsageError, SnapshotUsageError
 from .models import JSONValue
 
 SNAPSHOT_APPLICATION_ID = 0x41454753
@@ -214,5 +214,9 @@ def snapshot_database(
     from .inspection import Inspection
 
     deadline_for(timeout_seconds)
-    with Inspection(source) as reader:
+    try:
+        reader = Inspection(source)
+    except RuntimeUsageError as exc:
+        raise SnapshotUsageError(str(exc)) from exc
+    with reader:
         return reader.snapshot(destination, timeout_seconds=timeout_seconds)

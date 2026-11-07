@@ -55,8 +55,19 @@ a network share, synchronize live files with a file-sync agent, or swap database
 files underneath open connections. WAL activation is checked, but that cannot
 prove the hardware honors durable writes.
 Do not use hard-link aliases for live SQLite files: aliases can select different
-WAL/lock paths. Snapshot capture rejects hard-linked live sources and reserves
-case-folded source/sidecar paths conservatively, including on case-sensitive disks.
+WAL/lock paths. `Runtime` and `Inspection` reject multiply-linked database files
+with `RuntimeUsageError` before SQLite opens them. Snapshot capture rejects them
+with `SnapshotUsageError`, including before reading the source. Both the original
+name and its alias are refused: link count cannot establish which filename owns
+the authoritative WAL. Read-only inspection archives also require an unaliased
+database file. Normal symlinks are resolved to their target and remain supported.
+
+This checks the current link count, not history completeness, a WAL's identity,
+or filesystem changes after opening. Do not repair failures by blindly deleting
+aliases or sidecars. Stop affected workers, preserve the files, and establish the
+authoritative database/WAL pair before reopening. No automatic repair or choice
+of an authoritative filename is performed. Snapshot capture also reserves
+case-folded source/sidecar destinations, including on case-sensitive disks.
 
 ## Read-only diagnostics
 

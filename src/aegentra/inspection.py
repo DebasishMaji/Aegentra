@@ -10,7 +10,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
-from ._format import read_format
+from ._format import check_database_path, read_format
 from ._read import decode_record, find_unresolved_record, get_events, get_record, key_values
 from ._serialization import event_dict, record_dict
 from .errors import RuntimeUsageError, SnapshotUsageError
@@ -46,6 +46,7 @@ class Inspection:
         self._path = path
         self._owner = os.getpid(), threading.get_ident()
         self._closed = False
+        check_database_path(path)
         with ExitStack() as resources:
             self._db = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, isolation_level=None)
             resources.callback(self._db.close)

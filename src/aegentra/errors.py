@@ -30,7 +30,7 @@ class JournalVersionError(AegentraError):
 
 
 class RuntimeUsageError(AegentraError):
-    """The runtime is closed, busy, or used outside its owning thread or event loop."""
+    """A runtime or inspection is closed, busy, or violates storage or ownership requirements."""
 
 
 class SnapshotUsageError(AegentraError):

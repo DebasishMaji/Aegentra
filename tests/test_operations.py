@@ -18,6 +18,7 @@ from aegentra import (
     Operation,
     OperationRecord,
     Runtime,
+    RuntimeUsageError,
     SnapshotUsageError,
     snapshot,
     snapshot_database,
@@ -132,6 +133,62 @@ def test_runtime_still_rejects_a_filesystem_read_only_database(tmp_path: Path) -
         path.chmod(0o600)
     with Runtime(path, require_existing=True):
         pass
+
+
+@pytest.mark.parametrize("mode", ["runtime", "require_existing", "inspection", "snapshot"])
+@pytest.mark.parametrize("open_original", [False, True])
+def test_hard_linked_database_paths_are_rejected_before_sqlite_opens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, open_original: bool
+) -> None:
+    source, alias = tmp_path / "source.db", tmp_path / "alias.db"
+    with Runtime(source):
+        pass
+    before = source.read_bytes()
+    os.link(source, alias)
+    path = source if open_original else alias
+
+    def unexpected_open(*args, **kwargs):
+        raise AssertionError("An aliased database must not reach SQLite.")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", unexpected_open)
+        expected = SnapshotUsageError if mode == "snapshot" else RuntimeUsageError
+        with pytest.raises(expected, match="hard-link"):
+            if mode == "snapshot":
+                snapshot_database(path, tmp_path / "capture.db")
+            elif mode == "inspection":
+                Inspection(path)
+            else:
+                Runtime(path, require_existing=mode == "require_existing")
+    assert source.read_bytes() == before
+    for candidate in (source, alias):
+        assert not Path(f"{candidate}-wal").exists()
+        assert not Path(f"{candidate}-shm").exists()
+    assert not list(tmp_path.glob(".aegentra-provision-*"))
+
+
+def test_symlink_paths_resolve_to_the_single_authoritative_database(tmp_path: Path) -> None:
+    source, alias = tmp_path / "source.db", tmp_path / "symlink.db"
+    with Runtime(source):
+        pass
+    alias.symlink_to(source)
+    with Runtime(alias, require_existing=True):
+        with Inspection(alias) as reader:
+            assert reader.status()["healthy"] is True
+    assert alias.is_symlink()
+    assert source.stat().st_nlink == 1
+
+
+def test_cli_rejects_aliases_without_a_healthy_report_or_traceback(tmp_path: Path) -> None:
+    source, alias = tmp_path / "source.db", tmp_path / "alias.db"
+    with Runtime(source):
+        pass
+    os.link(source, alias)
+    result = cli("status", str(alias))
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "hard-link" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 async def test_snapshot_preserves_all_tenants_payloads_and_the_pinned_view(

@@ -12,7 +12,7 @@ from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ._format import read_format
+from ._format import check_database_path, read_format
 from ._read import decode_record, find_unresolved_record, get_events, get_record, key_values
 from .errors import (
     AdapterMismatch,
@@ -139,6 +139,7 @@ class Journal:
             # Keep the lock inode: unlinking it lets a third process lock a different file.
             resources.callback(fcntl.flock, lock_fd, fcntl.LOCK_UN)
             _provision(self.path, require_existing=require_existing)
+            check_database_path(self.path)
             self._db = sqlite3.connect(
                 f"{self.path.as_uri()}?mode=rw", uri=True, isolation_level=None
             )
