@@ -5,6 +5,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -343,6 +344,91 @@ def test_invalid_budgets_do_not_create_an_artifact(tmp_path: Path, timeout: floa
     with pytest.raises(ValueError):
         snapshot_database(source, target, timeout_seconds=timeout)
     assert not target.exists()
+
+
+def test_snapshot_deadline_bounds_source_lock_wait_and_allows_retry(tmp_path: Path) -> None:
+    source, target = tmp_path / "live.db", tmp_path / "capture.db"
+    with Runtime(source):
+        pass
+    with sqlite3.connect(source, isolation_level=None) as lock:
+        assert lock.execute("PRAGMA journal_mode = DELETE").fetchone()[0] == "delete"
+        lock.execute("BEGIN EXCLUSIVE")
+        started = time.monotonic()
+        try:
+            with pytest.raises(TimeoutError):
+                snapshot_database(source, target, timeout_seconds=0.02)
+        finally:
+            elapsed = time.monotonic() - started
+            lock.execute("ROLLBACK")
+        assert elapsed < 1.0
+    assert not target.exists()
+    assert not list(tmp_path.glob(".inspection-*"))
+    receipt = snapshot_database(source, target)
+    with Inspection(target) as reader:
+        assert reader.status()["healthy"] is True
+    assert receipt.info.source_event_sequence == 0
+
+
+@pytest.mark.parametrize("validation_elapsed", [6.0, 11.0])
+def test_snapshot_does_not_restart_the_budget_after_source_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, validation_elapsed: float
+) -> None:
+    from aegentra import _format
+    from aegentra import inspection as inspection_module
+
+    source, target = tmp_path / "live.db", tmp_path / "capture.db"
+    with Runtime(source):
+        pass
+    clock = 0.0
+    original_format = _format.read_format
+    original_connect = sqlite3.connect
+
+    def validate(*args, **kwargs):
+        nonlocal clock
+        result = original_format(*args, **kwargs)
+        clock = validation_elapsed
+        return result
+
+    class SlowCopy(sqlite3.Connection):
+        def backup(self, target, *, pages=-1, progress=None, name="main", sleep=0.250):
+            def step(status, remaining, total):
+                nonlocal clock
+                clock = 11.0
+                progress(status, remaining, total)
+
+            return super().backup(target, pages=pages, progress=step, name=name, sleep=sleep)
+
+    monkeypatch.setattr(_format, "read_format", validate)
+    monkeypatch.setattr(inspection_module, "read_format", validate)
+    monkeypatch.setattr(snapshot, "monotonic", lambda: clock)
+    monkeypatch.setattr(
+        sqlite3,
+        "connect",
+        lambda *args, **kwargs: original_connect(*args, **kwargs, factory=SlowCopy),
+    )
+    with pytest.raises(TimeoutError):
+        snapshot_database(source, target, timeout_seconds=10.0)
+    assert not target.exists()
+    assert not list(tmp_path.glob(".inspection-*"))
+
+
+def test_sqlite_deadline_preserves_a_shorter_busy_policy_and_restores_it(tmp_path: Path) -> None:
+    source = tmp_path / "locked.db"
+    with sqlite3.connect(source, isolation_level=None) as lock:
+        lock.execute("CREATE TABLE entries (value TEXT)")
+        lock.execute("BEGIN EXCLUSIVE")
+        with sqlite3.connect(source, timeout=0) as reader:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                with snapshot.sqlite_deadline(reader, snapshot.deadline_for(1.0)):
+                    reader.execute("SELECT * FROM entries").fetchall()
+            assert reader.execute("PRAGMA busy_timeout").fetchone()[0] == 0
+        lock.execute("ROLLBACK")
+    with sqlite3.connect(source) as reader:
+        reader.execute("PRAGMA busy_timeout = 1234")
+        with snapshot.sqlite_deadline(reader, snapshot.deadline_for(0.02)):
+            assert reader.execute("PRAGMA busy_timeout").fetchone()[0] <= 20
+        assert reader.execute("PRAGMA busy_timeout").fetchone()[0] == 1234
+        assert reader.execute("SELECT * FROM entries").fetchall() == []
 
 
 async def test_real_partial_backup_deadline_cleans_up_without_losing_live_state(

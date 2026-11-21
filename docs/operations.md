@@ -133,9 +133,17 @@ is not a provider-state timestamp; the checksum is not a signature or a
 tamper-proof audit. Retain the receipt independently if you need to compare
 archive integrity after transfer.
 
-Budgets are cooperative: SQLite VM checks, backup chunks, and hashing check the
-deadline. They cannot preempt a blocked operating-system call or impose an exact
-wall-clock limit on source opening, disk I/O, or synchronization. On failure,
+`snapshot_database` and the snapshot command use one deadline from capture entry,
+including source validation, backup, integrity checks, hashing, and publication.
+Source validation does not give copying a fresh budget. SQLite lock waits are
+limited to the smaller of the remaining budget (rounded up to milliseconds) and
+the connection's existing busy timeout. An earlier storage error still propagates;
+this does not add retries. `Inspection.snapshot()` starts its budget when called,
+because the inspection's source view is already open.
+
+Budgets remain cooperative: SQLite VM checks, backup chunks, and hashing check
+the deadline. They cannot preempt a blocked operating-system call or impose an
+exact wall-clock limit on source opening, disk I/O, or synchronization. On failure,
 private temporary files are cleaned up. **Failure after atomic publication can
 leave a complete artifact without a successful receipt**, for example if
 directory sync fails. Preserve and investigate it; do not overwrite or delete a

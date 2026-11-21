@@ -103,8 +103,12 @@ def check_deadline(deadline: float) -> None:
 @contextmanager
 def sqlite_deadline(db: sqlite3.Connection, deadline: float) -> Iterator[None]:
     check_deadline(deadline)
+    busy_timeout = db.execute("PRAGMA busy_timeout").fetchone()[0]
+    remaining = max(0.0, min(deadline - monotonic(), busy_timeout / 1000))
+    db.execute(f"PRAGMA busy_timeout = {min(busy_timeout, math.ceil(remaining * 1000))}")
     db.set_progress_handler(lambda: int(monotonic() >= deadline), 1000)
     try:
+        check_deadline(deadline)
         yield
         check_deadline(deadline)
     except sqlite3.OperationalError:
@@ -112,6 +116,7 @@ def sqlite_deadline(db: sqlite3.Connection, deadline: float) -> Iterator[None]:
         raise
     finally:
         db.set_progress_handler(None, 0)
+        db.execute(f"PRAGMA busy_timeout = {busy_timeout}")
 
 
 def database_issues(db: sqlite3.Connection) -> list[JSONValue]:
@@ -128,9 +133,9 @@ def publish_snapshot(
     destination: str | Path,
     *,
     schema_version: int,
-    timeout_seconds: float,
+    deadline: float,
 ) -> DatabaseSnapshot:
-    deadline = deadline_for(timeout_seconds)
+    check_deadline(deadline)
     requested = Path(destination).absolute()
     target = requested.parent.resolve(strict=True) / requested.name
     reserved = {
@@ -211,12 +216,19 @@ def snapshot_database(
     source: str | Path, destination: str | Path, *, timeout_seconds: float = 30.0
 ) -> DatabaseSnapshot:
     """Capture all tenants and raw payloads. Never promote the result to a writer."""
-    from .inspection import Inspection
+    from ._format import check_database_path, read_format
 
-    deadline_for(timeout_seconds)
+    deadline = deadline_for(timeout_seconds)
+    path = Path(source).resolve()
     try:
-        reader = Inspection(source)
+        check_database_path(path)
     except RuntimeUsageError as exc:
         raise SnapshotUsageError(str(exc)) from exc
-    with reader:
-        return reader.snapshot(destination, timeout_seconds=timeout_seconds)
+    with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, isolation_level=None)) as db:
+        with sqlite_deadline(db, deadline):
+            db.execute("PRAGMA query_only = ON")
+            db.execute("BEGIN")
+            version, info = read_format(db, allow_snapshot=True)
+            if info is not None:
+                raise SnapshotUsageError("Cannot relabel a historical snapshot as a new capture.")
+        return publish_snapshot(db, path, destination, schema_version=version, deadline=deadline)

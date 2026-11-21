@@ -101,7 +101,7 @@ class Inspection:
             self._path,
             destination,
             schema_version=self.schema_version,
-            timeout_seconds=timeout_seconds,
+            deadline=deadline_for(timeout_seconds),
         )
 
     def status(self, *, timeout_seconds: float = 5.0) -> dict[str, JSONValue]:
