@@ -26,7 +26,8 @@ Python 3.11+ | Standard-library core | Optional LangGraph integration | macOS an
 [LangGraph integration](docs/langgraph.md) |
 [Use the API](#put-a-boundary-around-a-write) |
 [Evaluate the fit](#when-is-this-worth-integrating) |
-[Read the contracts](#design-and-research)
+[Read the contracts](#design-and-research) |
+[Contribute](#contributing)
 
 ## The identity that a retry key can miss
 
@@ -340,6 +341,13 @@ novelty is claimed.
 | [Research gates](docs/research.md) | Prior art and the evidence needed for stronger claims. |
 
 ## Contributing
+
+New contributors are welcome. Start with a
+[good first issue](https://github.com/DebasishMaji/Aegentra/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22),
+or browse [help wanted](https://github.com/DebasishMaji/Aegentra/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22)
+for deeper testing, adapter, and measurement work. Issues include scope,
+acceptance criteria, and code pointers. Comment before starting to coordinate;
+see the [contribution workflow](CONTRIBUTING.md#find-a-task-and-open-a-pull-request).
 
 ```sh
 uv sync --locked --extra langgraph

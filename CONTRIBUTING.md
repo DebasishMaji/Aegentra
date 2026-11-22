@@ -2,6 +2,29 @@
 
 Contributions are licensed under Apache 2.0, as described in [LICENSE](LICENSE).
 
+## Find a task and open a pull request
+
+First-time contributors are welcome. Browse
+[good first issues](https://github.com/DebasishMaji/Aegentra/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)
+for small documentation and test tasks, or
+[help wanted](https://github.com/DebasishMaji/Aegentra/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22)
+for deeper work. Read the issue's acceptance criteria and comment with your
+intended approach so others can coordinate. A comment is not an exclusive
+reservation or a promise of immediate maintainer review.
+
+Fork the repository, clone your fork, and create a branch with
+`git switch -c your-change`. Make a small, focused change, run the applicable
+checks below, push the branch to your fork, and open a pull request against
+`DebasishMaji/Aegentra:main`. Link the issue and include a minimal failure trace
+or documentation rationale. Draft pull requests are welcome for early feedback.
+
+Discuss public API, schema, adapter-contract, dependency, and benchmark changes
+in an issue before expanding the implementation. Bug reports should use
+synthetic data and the issue template; never upload credentials, private
+journals, real receipts, or personal data.
+
+## Development and contract checks
+
 Start with a failure trace, not another abstraction.
 
 Changes to dispatch, intent binding, or finality should include a small scenario

@@ -1,0 +1,34 @@
+name: Improvement proposal
+description: Propose a bounded documentation, testing, integration, or library improvement.
+title: "[Idea]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check existing help-wanted issues before proposing new scope. Prefer a
+        concrete failure or user need. Do not include private data or credentials.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or user need
+      description: What is missing, and how does it affect an application or contributor?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope and acceptance criteria
+      description: Describe a small first increment, how it will be checked, and what is out of scope.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Contract and evidence considerations
+      description: Note effects on intent binding, unresolved scopes, provider finality, dependencies, or experimental comparisons.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and contribution interest
+      description: Link related issues, describe simpler alternatives, and say whether you want to work on it.

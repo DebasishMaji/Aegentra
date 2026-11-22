@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contribution guide
+    url: https://github.com/DebasishMaji/Aegentra/blob/main/CONTRIBUTING.md
+    about: Setup, available tasks, pull request workflow, and contract checks.

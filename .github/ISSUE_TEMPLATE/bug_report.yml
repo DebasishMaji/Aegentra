@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible failure in the documented Aegentra contract.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic data only. Do not upload credentials, private journals,
+        real receipts, or personal data. Aegentra is a research alpha; provider
+        finality and application-declared business identity remain trust boundaries.
+  - type: input
+    id: revision
+    attributes:
+      label: Version or commit
+      description: Which checkout or installed version reproduces the problem?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Python, SQLite, OS, and optional integration versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide sandbox-only steps or code using a temporary local database.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected decision and external effects
+      description: State the expected outcome, scope blocking, and provider effect count.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include the observed outcome, exception, and synthetic event/effect trace.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: My reproduction contains only synthetic data and no secrets or personal data.
+          required: true
