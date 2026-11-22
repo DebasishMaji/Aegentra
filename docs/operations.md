@@ -71,6 +71,15 @@ case-folded source/sidecar destinations, including on case-sensitive disks.
 
 ## Read-only diagnostics
 
+Existing journals must retain a nonpartial unique operation-key index with
+`BINARY` collation on tenant, account, and operation ID. The unresolved-scope
+index also requires `BINARY` collation on every scope component. Matching column
+names and schema markers are not sufficient: case-insensitive indexes can alias
+distinct application identities. Runtime startup, inspection, and capture reject
+these incompatible indexes with `JournalVersionError`; no automatic schema
+repair is attempted. This checks declared index metadata, not authenticity or
+complete history. Keep database files trusted and do not edit schema manually.
+
 ```sh
 aegentra status /srv/agent/obligations.sqlite3 --timeout 5
 aegentra list /srv/agent/obligations.sqlite3 --limit 100

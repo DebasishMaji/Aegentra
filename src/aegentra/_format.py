@@ -22,6 +22,27 @@ def check_database_path(path: Path) -> None:
         raise RuntimeUsageError(f"SQLite database files must not have hard-link aliases: {path}")
 
 
+def _index_key(db: sqlite3.Connection, name: str) -> tuple[tuple[str | None, str | None], ...]:
+    return tuple(
+        (row[0], row[1].upper() if row[1] is not None else None)
+        for row in db.execute(
+            "SELECT name, coll FROM pragma_index_xinfo(?) WHERE key = 1 ORDER BY seqno",
+            (name,),
+        )
+    )
+
+
+def _has_unique_key(db: sqlite3.Connection, table: str, columns: tuple[str, ...]) -> bool:
+    expected = tuple((column, "BINARY") for column in columns)
+    return any(
+        _index_key(db, row[0]) == expected
+        for row in db.execute(
+            'SELECT name FROM pragma_index_list(?) WHERE "unique" = 1 AND partial = 0',
+            (table,),
+        )
+    )
+
+
 def read_format(
     db: sqlite3.Connection, *, allow_snapshot: bool = False
 ) -> tuple[int, SnapshotInfo | None]:
@@ -68,6 +89,8 @@ def read_format(
         actual = tuple(row[1] for row in db.execute(f"PRAGMA table_info({table})"))
         if actual != columns:
             raise JournalVersionError(f"Invalid journal table layout: {table}.")
+    if not _has_unique_key(db, "operations", ("tenant", "account", "operation_id")):
+        raise JournalVersionError("Invalid journal identity index: operations.")
     index = db.execute(
         "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'unresolved_scope'"
     ).fetchone()
@@ -82,6 +105,8 @@ def read_format(
             "createuniqueindexunresolved_scopeonoperations"
             "(tenant,account,resource,effect)whereknowledge"
         )
+        or _index_key(db, "unresolved_scope")
+        != tuple((column, "BINARY") for column in ("tenant", "account", "resource", "effect"))
     ):
         raise JournalVersionError("Invalid unresolved-effect uniqueness index.")
     return version, info

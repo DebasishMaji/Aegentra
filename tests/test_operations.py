@@ -540,6 +540,95 @@ def test_provisioning_does_not_claim_an_unrelated_view_only_database(tmp_path: P
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    "defect", ["missing_identity", "partial_identity", "casefold_identity", "casefold_scope"]
+)
+def test_incompatible_identity_indexes_are_rejected_without_modifying_state(
+    tmp_path: Path, defect: str
+) -> None:
+    from aegentra.journal import _SCHEMA_V1, _UPGRADE_V1_TO_V2
+
+    source, target = tmp_path / "incompatible.db", tmp_path / "capture.db"
+    with sqlite3.connect(source) as db:
+        for statement in _SCHEMA_V1:
+            if defect in ("missing_identity", "partial_identity"):
+                statement = statement.replace(
+                    "PRIMARY KEY (tenant, account, operation_id)",
+                    "CHECK (length(operation_id) > 0)",
+                )
+            elif defect == "casefold_identity":
+                statement = statement.replace(
+                    "tenant TEXT NOT NULL", "tenant TEXT COLLATE NOCASE NOT NULL"
+                )
+            else:
+                statement = statement.replace(
+                    "resource TEXT NOT NULL", "resource TEXT COLLATE NOCASE NOT NULL"
+                )
+            db.execute(statement)
+        for statement in _UPGRADE_V1_TO_V2:
+            db.execute(statement)
+        if defect == "missing_identity":
+            db.execute("CREATE INDEX identity_shape ON operations(tenant, account, operation_id)")
+        elif defect == "partial_identity":
+            db.execute(
+                "CREATE UNIQUE INDEX identity_shape ON operations(tenant, account, operation_id) "
+                "WHERE knowledge = 'unknown'"
+            )
+        db.execute("PRAGMA user_version = 2")
+    before = source.read_bytes()
+    with pytest.raises(JournalVersionError, match="identity|uniqueness"):
+        with Runtime(source, require_existing=True):
+            pass
+    with pytest.raises(JournalVersionError, match="identity|uniqueness"):
+        with Inspection(source):
+            pass
+    with pytest.raises(JournalVersionError, match="identity|uniqueness"):
+        snapshot_database(source, target)
+    assert source.read_bytes() == before
+    assert not target.exists()
+
+
+def test_identity_validation_accepts_an_equivalent_named_unique_index(tmp_path: Path) -> None:
+    from aegentra.journal import _SCHEMA_V1, _UPGRADE_V1_TO_V2
+
+    source = tmp_path / "live.db"
+    with sqlite3.connect(source) as db:
+        for statement in _SCHEMA_V1:
+            db.execute(
+                statement.replace(
+                    "PRIMARY KEY (tenant, account, operation_id)",
+                    "CHECK (length(operation_id) > 0)",
+                )
+            )
+        for statement in _UPGRADE_V1_TO_V2:
+            db.execute(statement)
+        db.execute(
+            'CREATE UNIQUE INDEX "identity""key" ON operations'
+            "(tenant COLLATE binary, account COLLATE binary, operation_id COLLATE binary)"
+        )
+        db.execute("PRAGMA user_version = 2")
+    with Runtime(source, require_existing=True):
+        with Inspection(source) as reader:
+            assert reader.status()["healthy"] is True
+
+
+async def test_case_distinct_operation_and_scope_identifiers_remain_independent(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    source = tmp_path / "live.db"
+    other = replace(
+        operation, scope=replace(operation.scope, tenant=operation.scope.tenant.upper())
+    )
+    with Runtime(source) as runtime:
+        first = await runtime.perform(operation, tool=RefundTool(ledger))
+        second = await runtime.perform(other, tool=RefundTool(ledger))
+        assert first.record.key == operation.key
+        assert second.record.key == other.key
+        assert runtime.inspect(operation.key) == first.record
+        assert runtime.inspect(other.key) == second.record
+    assert len(ledger.refunds()) == 2
+
+
 def test_format_spoofing_and_foreign_key_damage_fail_closed(tmp_path: Path) -> None:
     source, target = tmp_path / "live.db", tmp_path / "capture.db"
     with sqlite3.connect(source) as db:
