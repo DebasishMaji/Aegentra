@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/DebasishMaji/Aegentra/security/advisories/new
+    about: Do not put exploit details, credentials, or private journals in public issues.
+  - name: Contributor roadmap
+    url: https://github.com/DebasishMaji/Aegentra/blob/main/ROADMAP.md
+    about: Bounded opportunities, staged evidence gates, and linked work in progress.
   - name: Contribution guide
     url: https://github.com/DebasishMaji/Aegentra/blob/main/CONTRIBUTING.md
     about: Setup, available tasks, pull request workflow, and contract checks.

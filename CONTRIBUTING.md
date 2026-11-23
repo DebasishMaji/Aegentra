@@ -23,6 +23,30 @@ in an issue before expanding the implementation. Bug reports should use
 synthetic data and the issue template; never upload credentials, private
 journals, real receipts, or personal data.
 
+## Review expectations and project policies
+
+Use the [roadmap](ROADMAP.md) to find a bounded task and check linked pull
+requests before duplicating work. `needs design` issues require an agreed
+scenario and boundaries before implementation; area labels help find matching
+documentation, tests, CI, or example work.
+
+In the PR, connect each acceptance criterion to the relevant change and
+evidence. State commands actually run, outcomes, and skipped checks with reasons.
+For documentation, exercise runnable snippets. For behavior changes, include a
+focused regression that fails without the fix; test-only coverage should state
+the existing contract it exercises. Do not claim an independent test run from
+reading code or someone else's CI.
+
+CI from a first-time fork may wait for maintainer approval. A pending approval
+is not a failed test; mention the run in the PR rather than bypassing the gate.
+Review and revisions are collaborative and best effort, not a response-time
+promise. Passing checks does not automatically approve or merge a contribution.
+
+Follow [governance](GOVERNANCE.md) and the
+[code of conduct](CODE_OF_CONDUCT.md). Vulnerabilities and sensitive findings
+must use [private security reporting](SECURITY.md); ordinary bug templates are
+public.
+
 ## Development and contract checks
 
 Start with a failure trace, not another abstraction.

@@ -27,6 +27,7 @@ Python 3.11+ | Standard-library core | Optional LangGraph integration | macOS an
 [Use the API](#put-a-boundary-around-a-write) |
 [Evaluate the fit](#when-is-this-worth-integrating) |
 [Read the contracts](#design-and-research) |
+[Roadmap](ROADMAP.md) |
 [Contribute](#contributing)
 
 ## The identity that a retry key can miss
@@ -348,6 +349,12 @@ or browse [help wanted](https://github.com/DebasishMaji/Aegentra/issues?q=is%3Ai
 for deeper testing, adapter, and measurement work. Issues include scope,
 acceptance criteria, and code pointers. Comment before starting to coordinate;
 see the [contribution workflow](CONTRIBUTING.md#find-a-task-and-open-a-pull-request).
+
+The [staged roadmap](ROADMAP.md) groups concrete tasks by contract coverage,
+measurement, and application examples. Read [governance](GOVERNANCE.md) for
+decisions and review expectations, and the [code of conduct](CODE_OF_CONDUCT.md)
+for community participation. Sensitive findings belong in the
+[private security reporting channel](SECURITY.md), not public issues.
 
 ```sh
 uv sync --locked --extra langgraph
