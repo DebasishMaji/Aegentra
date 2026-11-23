@@ -233,6 +233,118 @@ async def test_snapshot_preserves_all_tenants_payloads_and_the_pinned_view(
     assert not (tmp_path / "relabeled.db").exists()
 
 
+async def test_literal_percent_escapes_and_unicode_database_paths(
+    tmp_path: Path, operation: Operation, ledger: RefundLedger
+) -> None:
+    journal_dir = tmp_path / "téřřä_✨_δοκιμή"
+    journal_dir.mkdir()
+    source = journal_dir / "journal%2Fname.db"
+
+    archive_dir = tmp_path / "áŕćhïvé_📦_δοκιμή"
+    archive_dir.mkdir()
+    destination = archive_dir / "snapshot%2Farchive.db"
+
+    tool = RefundTool(ledger, Scenario.LOST_ACKNOWLEDGMENT)
+
+    # 1. Create an unresolved sandbox operation in that database and close the runtime.
+    with Runtime(source) as runtime:
+        await runtime.perform(operation, tool=tool)
+        assert runtime.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+
+    # 2. Reopen the exact file with require_existing=True.
+    with Runtime(source, require_existing=True) as reopened:
+        reopened_record = reopened.inspect(operation.key)
+        assert reopened_record.knowledge is Knowledge.UNKNOWN
+        assert reopened_record.arguments == operation.arguments
+
+    # 3. Confirm read-only inspection and CLI diagnostics select that exact journal%2Fname.db file.
+    with Inspection(source) as reader:
+        status = reader.status()
+        assert status["healthy"] is True
+        assert status["operations_by_knowledge"] == {"unknown": 1}
+        unresolved = reader.find_unresolved(operation.scope)
+        assert unresolved is not None
+        assert unresolved.key == operation.key
+        assert reader.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+        listing = reader.list_operations(knowledge=Knowledge.UNKNOWN)
+        assert len(listing.records) == 1
+        assert listing.records[0].key == operation.key
+
+        # 4. Capture a snapshot/archive to unusual destination (Unicode dir + literal %2F).
+        artifact = reader.snapshot(destination)
+
+    # CLI diagnostics on source database
+    status_result = cli("status", str(source))
+    assert status_result.returncode == 0, status_result.stderr
+    status_report = json.loads(status_result.stdout)
+    assert status_report["healthy"] is True
+    assert status_report["operations_by_knowledge"] == {"unknown": 1}
+
+    list_result = cli("list", str(source))
+    assert list_result.returncode == 0, list_result.stderr
+    list_report = json.loads(list_result.stdout)
+    assert len(list_report["operations"]) == 1
+    assert list_report["operations"][0]["key"]["operation_id"] == operation.key.operation_id
+
+    inspect_result = cli(
+        "inspect",
+        str(source),
+        "--tenant",
+        operation.key.tenant,
+        "--account",
+        operation.key.account,
+        "--operation-id",
+        operation.key.operation_id,
+    )
+    assert inspect_result.returncode == 0, inspect_result.stderr
+    inspect_report = json.loads(inspect_result.stdout)
+    assert inspect_report["operation"]["knowledge"] == "unknown"
+
+    # 5. Confirm the captured archive remains inspection-only.
+    with Inspection(destination) as saved:
+        saved_status = saved.status()
+        assert saved_status["healthy"] is True
+        assert saved_status["operations_by_knowledge"] == {"unknown": 1}
+        assert saved_status["snapshot"]["inspection_only"] is True
+        assert saved.snapshot_info == artifact.info
+        assert saved.inspect(operation.key).knowledge is Knowledge.UNKNOWN
+        assert saved.export_trace(operation.key)["snapshot"]["inspection_only"] is True
+
+    archive_cli_result = cli("status", str(destination))
+    assert archive_cli_result.returncode == 0, archive_cli_result.stderr
+    archive_cli_report = json.loads(archive_cli_result.stdout)
+    assert archive_cli_report["healthy"] is True
+    assert archive_cli_report["snapshot"]["inspection_only"] is True
+
+    destination_bytes = destination.read_bytes()
+    with pytest.raises(SnapshotUsageError):
+        Runtime(destination)
+    with pytest.raises(SnapshotUsageError):
+        Runtime(destination, require_existing=True)
+    with pytest.raises(SnapshotUsageError):
+        snapshot_database(destination, archive_dir / "relabeled%2Fcopy.db")
+    assert destination.read_bytes() == destination_bytes
+
+    # 6. Explicitly assert no unintended decoded sibling/alternate path was created.
+    assert source.is_file()
+    assert destination.is_file()
+
+    assert not (journal_dir / "journal").exists()
+    assert not (journal_dir / "journal" / "name.db").exists()
+    assert not (journal_dir / "name.db").exists()
+    assert not (tmp_path / "journal").exists()
+
+    assert not (archive_dir / "snapshot").exists()
+    assert not (archive_dir / "snapshot" / "archive.db").exists()
+    assert not (archive_dir / "archive.db").exists()
+    assert not (tmp_path / "snapshot").exists()
+
+    for entry in journal_dir.rglob("*"):
+        assert "journal%2Fname.db" in entry.name
+    for entry in archive_dir.rglob("*"):
+        assert "snapshot%2Farchive.db" in entry.name
+
+
 def test_require_existing_never_initializes_missing_or_empty_state(tmp_path: Path) -> None:
     path = tmp_path / "live.db"
     with pytest.raises(FileNotFoundError):
